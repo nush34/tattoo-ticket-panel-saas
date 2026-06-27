@@ -2,12 +2,13 @@ import { createClient } from "../supabase/client";
 
 export type StudioRole = "owner" | "admin" | "designer" | "artist";
 export type AccountType = "studio" | "individual";
+export type StudioStatus = "trial" | "active" | "suspended" | "cancelled";
 
 export type CurrentStudio = {
   studio_id: string;
   studio_name: string;
   studio_slug: string;
-  studio_status: "trial" | "active" | "suspended" | "cancelled";
+  studio_status: StudioStatus;
   account_type: AccountType;
   member_id: string;
   user_id: string;
@@ -18,8 +19,11 @@ export type CurrentStudio = {
   user_limit?: number | null;
   trial_started_at?: string | null;
   trial_ends_at?: string | null;
+  subscription_start_date?: string | null;
+  subscription_end_date?: string | null;
   plan_name?: string | null;
   payment_status?: string | null;
+  monthly_price?: number | null;
 };
 
 export type StudioStaffMember = {
@@ -96,6 +100,15 @@ export function getPanelPathByRole(role: StudioRole) {
 }
 
 export function getPanelPathByStudio(studio: CurrentStudio) {
+  if (
+    studio.account_type === "studio" &&
+    (studio.studio_status === "suspended" ||
+      studio.studio_status === "cancelled" ||
+      studio.payment_status === "expired")
+  ) {
+    return "/abonelik";
+  }
+
   if (studio.account_type === "individual") {
     return "/solo-panel";
   }
