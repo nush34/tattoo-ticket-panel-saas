@@ -9,11 +9,11 @@ export default function HomePage() {
         </div>
 
         <h1 className="max-w-4xl text-4xl font-bold tracking-tight md:text-6xl">
-          Dövme randevilerini, ödemeleri ve işleri tek panelden takip et.
+          Dövme randevulerini, ödemeleri ve işleri tek panelden takip et.
         </h1>
 
         <p className="mt-6 max-w-2xl text-base leading-7 text-neutral-300 md:text-lg">
-          Tattoo Ticket Panel ile stüdyolar ekiplerini, bireysel sanatçılar ise
+          Panelingo ile stüdyolar ekiplerini, bireysel sanatçılar ise
           kendi randevu ve ödeme akışını kolayca yönetebilir.
         </p>
 
