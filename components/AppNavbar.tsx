@@ -4,208 +4,230 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "../lib/supabase/client";
-import {
-  CurrentStudio,
-  getCurrentStudio,
-  getPanelPathByStudio,
-} from "../lib/saas/studio";
+import { getCurrentStudio, type CurrentStudio } from "../lib/saas/studio";
 
-type NavbarSettings = {
+type StudioSettings = {
+  studio_name: string | null;
   logo_url: string | null;
 };
 
 export default function AppNavbar() {
-  const router = useRouter();
   const pathname = usePathname();
+  const router = useRouter();
 
-  const [studio, setStudio] = useState<CurrentStudio | null>(null);
-  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [currentStudio, setCurrentStudio] = useState<CurrentStudio | null>(null);
+  const [settings, setSettings] = useState<StudioSettings | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const isPublicPage =
+    pathname === "/" ||
+    pathname === "/login" ||
+    pathname.startsWith("/kayit");
+
   useEffect(() => {
-    let isMounted = true;
-
-    async function loadNavbar() {
-      setLoading(true);
-
-      const hiddenPage = pathname === "/login" || pathname.startsWith("/login/");
-
-      if (hiddenPage) {
-        if (!isMounted) return;
-        setStudio(null);
-        setLogoUrl(null);
-        setLoading(false);
-        return;
-      }
-
-      const supabase = createClient();
-
-      const { data: sessionData } = await supabase.auth.getSession();
-
-      if (!sessionData.session?.user) {
-        if (!isMounted) return;
-        setStudio(null);
-        setLogoUrl(null);
-        setLoading(false);
-        return;
-      }
-
-      const currentStudio = await getCurrentStudio();
-
-      if (!currentStudio) {
-        if (!isMounted) return;
-        setStudio(null);
-        setLogoUrl(null);
-        setLoading(false);
-        return;
-      }
-
-      const { data: settingsData } = await supabase
-        .from("studio_settings")
-        .select("logo_url")
-        .eq("studio_id", currentStudio.studio_id)
-        .maybeSingle<NavbarSettings>();
-
-      if (!isMounted) return;
-
-      setStudio(currentStudio);
-      setLogoUrl(settingsData?.logo_url || null);
+    if (isPublicPage) {
       setLoading(false);
+      return;
     }
 
     loadNavbar();
 
-    window.addEventListener("studio-settings-updated", loadNavbar);
+    function handleSettingsUpdated() {
+      loadNavbar();
+    }
+
+    window.addEventListener("studio-settings-updated", handleSettingsUpdated);
 
     return () => {
-      isMounted = false;
-      window.removeEventListener("studio-settings-updated", loadNavbar);
+      window.removeEventListener(
+        "studio-settings-updated",
+        handleSettingsUpdated
+      );
     };
   }, [pathname]);
+
+  async function loadNavbar() {
+    setLoading(true);
+
+    const studio = await getCurrentStudio();
+
+    if (!studio) {
+      setCurrentStudio(null);
+      setSettings(null);
+      setLoading(false);
+      return;
+    }
+
+    setCurrentStudio(studio);
+
+    const supabase = createClient();
+
+    const { data } = await supabase
+      .from("studio_settings")
+      .select("studio_name, logo_url")
+      .eq("studio_id", studio.studio_id)
+      .maybeSingle();
+
+    setSettings(data || null);
+    setLoading(false);
+  }
 
   async function handleLogout() {
     const supabase = createClient();
     await supabase.auth.signOut();
-    router.replace("/login");
+    router.push("/login");
+    router.refresh();
   }
 
-  function isActive(path: string) {
-    return pathname === path || pathname.startsWith(`${path}/`);
+  if (isPublicPage) {
+    return null;
   }
 
-  const hiddenPage = pathname === "/login" || pathname.startsWith("/login/");
+  if (loading) {
+    return null;
+  }
 
-  if (hiddenPage || loading || !studio) return null;
+  if (!currentStudio) {
+    return null;
+  }
 
-  const isSolo = studio.account_type === "individual";
-  const isAdmin = studio.role === "owner" || studio.role === "admin";
-  const isDesigner = studio.role === "designer";
-  const isArtist = studio.role === "artist";
+  const isIndividual = currentStudio.account_type === "individual";
+  const role = currentStudio.role;
 
-  const mainPanelPath = getPanelPathByStudio(studio);
+  const studioDisplayName =
+    settings?.studio_name || currentStudio.studio_name || "Tattoo Panel";
+
+  const logoUrl = settings?.logo_url;
+
+  const linkClass = (href: string) =>
+    `rounded-xl px-3 py-2 text-sm font-semibold transition ${
+      pathname === href
+        ? "bg-yellow-400 text-neutral-950"
+        : "text-neutral-200 hover:bg-white/10 hover:text-white"
+    }`;
 
   return (
-    <header className="sticky top-0 z-50 border-b border-white/10 bg-zinc-950/90 backdrop-blur print:hidden">
-      <div className="mx-auto max-w-7xl px-4 md:px-6">
-        <div className="flex min-h-16 items-center justify-between gap-4">
-          <div className="flex items-center gap-3 min-w-0">
-            <Link
-              href={mainPanelPath}
-              className="flex h-12 min-w-36 items-center justify-center overflow-hidden rounded-2xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-2 font-black text-yellow-100"
-            >
+    <header className="sticky top-0 z-50 border-b border-white/10 bg-neutral-950/90 backdrop-blur">
+      <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 md:flex-row md:items-center md:justify-between">
+        <div className="flex items-center gap-3">
+          <Link
+            href={isIndividual ? "/solo-panel" : "/admin-panel"}
+            className="flex items-center gap-3"
+          >
+            <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-2xl bg-yellow-400 text-sm font-black text-neutral-950">
               {logoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={logoUrl}
-                  alt={studio.studio_name}
-                  className="max-h-9 max-w-32 object-contain"
+                  alt={studioDisplayName}
+                  className="h-full w-full object-cover"
                 />
               ) : (
-                <span>Tattoo Panel</span>
+                "TP"
               )}
-            </Link>
-
-            <div className="hidden md:block min-w-0">
-              <p className="truncate text-sm font-semibold text-white">
-                {studio.studio_name}
-              </p>
-              <p className="truncate text-xs text-zinc-500">
-                {studio.full_name} / {isSolo ? "Bireysel" : roleLabel(studio.role)}
-              </p>
             </div>
-          </div>
 
-          <nav className="flex items-center gap-2 overflow-x-auto">
-            {isSolo ? (
-              <>
-                <NavLink href="/solo-panel" active={isActive("/solo-panel")}>Solo Panel</NavLink>
-                <NavLink href="/ayarlar" active={isActive("/ayarlar")}>Ayarlar</NavLink>
-              </>
-            ) : (
-              <>
-                {isAdmin && (
-                  <NavLink href="/admin-panel" active={isActive("/admin-panel")}>Admin</NavLink>
-                )}
-                {isDesigner && (
-                  <NavLink href="/tasarimci-panel" active={isActive("/tasarimci-panel")}>Tasarımcı</NavLink>
-                )}
-                {isArtist && (
-                  <NavLink href="/dovmeci-panel" active={isActive("/dovmeci-panel")}>Dövmeci</NavLink>
-                )}
-                {(isAdmin || isDesigner) && (
-                  <>
-                    <NavLink href="/biletler" active={isActive("/biletler")}>Biletler</NavLink>
-                    <NavLink href="/yeni-bilet" active={isActive("/yeni-bilet")}>Yeni Bilet</NavLink>
-                    <NavLink href="/takvim" active={isActive("/takvim")}>Takvim</NavLink>
-                    <NavLink href="/ayarlar" active={isActive("/ayarlar")}>Ayarlar</NavLink>
-                  </>
-                )}
-                {isAdmin && (
-                  <NavLink href="/raporlar" active={isActive("/raporlar")}>Raporlar</NavLink>
-                )}
-              </>
-            )}
-
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="whitespace-nowrap rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-semibold text-red-200 hover:bg-red-500/20"
-            >
-              Çıkış
-            </button>
-          </nav>
+            <div>
+              <div className="text-sm font-bold text-white">
+                {studioDisplayName}
+              </div>
+              <div className="text-xs text-neutral-400">
+                {isIndividual ? "Bireysel Solo Panel" : "Stüdyo Paneli"}
+              </div>
+            </div>
+          </Link>
         </div>
+
+        <nav className="flex flex-wrap items-center gap-2">
+          {isIndividual ? (
+            <>
+              <Link href="/solo-panel" className={linkClass("/solo-panel")}>
+                Solo Panel
+              </Link>
+
+              <Link href="/ayarlar" className={linkClass("/ayarlar")}>
+                Ayarlar
+              </Link>
+            </>
+          ) : (
+            <>
+              {(role === "owner" || role === "admin") && (
+                <>
+                  <Link href="/admin-panel" className={linkClass("/admin-panel")}>
+                    Admin Panel
+                  </Link>
+
+                  <Link href="/yeni-bilet" className={linkClass("/yeni-bilet")}>
+                    Yeni Bilet
+                  </Link>
+
+                  <Link href="/biletler" className={linkClass("/biletler")}>
+                    Biletler
+                  </Link>
+
+                  <Link href="/takvim" className={linkClass("/takvim")}>
+                    Takvim
+                  </Link>
+
+                  <Link href="/raporlar" className={linkClass("/raporlar")}>
+                    Raporlar
+                  </Link>
+
+                  <Link href="/ayarlar" className={linkClass("/ayarlar")}>
+                    Ayarlar
+                  </Link>
+                </>
+              )}
+
+              {role === "designer" && (
+                <>
+                  <Link
+                    href="/tasarimci-panel"
+                    className={linkClass("/tasarimci-panel")}
+                  >
+                    Tasarımcı Paneli
+                  </Link>
+
+                  <Link href="/yeni-bilet" className={linkClass("/yeni-bilet")}>
+                    Yeni Bilet
+                  </Link>
+
+                  <Link href="/biletler" className={linkClass("/biletler")}>
+                    Biletler
+                  </Link>
+
+                  <Link href="/takvim" className={linkClass("/takvim")}>
+                    Takvim
+                  </Link>
+                </>
+              )}
+
+              {role === "artist" && (
+                <>
+                  <Link
+                    href="/dovmeci-panel"
+                    className={linkClass("/dovmeci-panel")}
+                  >
+                    Dövmeci Paneli
+                  </Link>
+
+                  <Link href="/takvim" className={linkClass("/takvim")}>
+                    Takvim
+                  </Link>
+                </>
+              )}
+            </>
+          )}
+
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-neutral-300 transition hover:bg-red-500/10 hover:text-red-200"
+          >
+            Çıkış
+          </button>
+        </nav>
       </div>
     </header>
   );
-}
-
-function NavLink({
-  href,
-  active,
-  children,
-}: {
-  href: string;
-  active: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <Link
-      href={href}
-      className={
-        active
-          ? "whitespace-nowrap rounded-2xl border border-yellow-500/40 bg-yellow-500/15 px-4 py-2 text-sm font-bold text-yellow-100"
-          : "whitespace-nowrap rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-zinc-300 hover:bg-white/10 hover:text-white"
-      }
-    >
-      {children}
-    </Link>
-  );
-}
-
-function roleLabel(role: CurrentStudio["role"]) {
-  if (role === "owner") return "Owner";
-  if (role === "admin") return "Admin";
-  if (role === "designer") return "Tasarımcı";
-  if (role === "artist") return "Dövmeci";
-  return role;
 }

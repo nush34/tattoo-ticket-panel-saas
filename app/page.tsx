@@ -1,122 +1,87 @@
-"use client";
-
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
-
-type UserRole = "admin" | "tasarimci" | "dovmeci";
-
-type Profile = {
-  id: string;
-  full_name: string;
-  email: string;
-  role: UserRole;
-  is_active: boolean;
-};
+import Link from "next/link";
 
 export default function HomePage() {
-  const router = useRouter();
-
-  useEffect(() => {
-    async function redirectUser() {
-      const supabase = createClient();
-
-      const { data: sessionData } = await supabase.auth.getSession();
-
-      if (!sessionData.session?.user) {
-        router.push("/login");
-        return;
-      }
-
-      const userId = sessionData.session.user.id;
-
-      const { data: profileData, error: profileError } = await supabase
-        .from("profiles")
-        .select("id, full_name, email, role, is_active")
-        .eq("id", userId)
-        .single<Profile>();
-
-      if (profileError || !profileData) {
-        await supabase.auth.signOut();
-        router.push("/login");
-        return;
-      }
-
-      if (!profileData.is_active) {
-        await supabase.auth.signOut();
-        router.push("/login");
-        return;
-      }
-
-      if (profileData.role === "admin") {
-        router.push("/admin-panel");
-        return;
-      }
-
-      if (profileData.role === "tasarimci") {
-        router.push("/tasarimci-panel");
-        return;
-      }
-
-      if (profileData.role === "dovmeci") {
-        router.push("/dovmeci-panel");
-        return;
-      }
-
-      router.push("/login");
-    }
-
-    redirectUser();
-  }, [router]);
-
   return (
-    <main className="min-h-screen elegant-page text-white flex items-center justify-center p-4 md:p-6">
-      <div className="w-full max-w-md">
-        <div className="rounded-[2rem] elegant-card p-6 md:p-8 text-center overflow-hidden relative">
-          <div className="absolute -top-24 -right-24 h-72 w-72 rounded-full bg-yellow-500/10 blur-3xl" />
-          <div className="absolute -bottom-24 -left-24 h-72 w-72 rounded-full bg-white/5 blur-3xl" />
+    <main className="min-h-screen bg-neutral-950 text-white">
+      <section className="mx-auto flex min-h-screen w-full max-w-6xl flex-col items-center justify-center px-6 py-16 text-center">
+        <div className="mb-6 rounded-full border border-yellow-400/30 bg-yellow-400/10 px-4 py-2 text-sm text-yellow-300">
+          Dövme stüdyoları ve bireysel sanatçılar için rezervasyon paneli
+        </div>
 
-          <div className="relative">
-            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl border border-yellow-500/30 bg-yellow-500/10 shadow-[0_0_55px_rgba(212,175,55,0.15)]">
-              <span className="text-lg font-black elegant-gold">TT</span>
+        <h1 className="max-w-4xl text-4xl font-bold tracking-tight md:text-6xl">
+          Dövme randevilerini, ödemeleri ve işleri tek panelden takip et.
+        </h1>
+
+        <p className="mt-6 max-w-2xl text-base leading-7 text-neutral-300 md:text-lg">
+          Tattoo Ticket Panel ile stüdyolar ekiplerini, bireysel sanatçılar ise
+          kendi randevu ve ödeme akışını kolayca yönetebilir.
+        </p>
+
+        <div className="mt-10 grid w-full max-w-4xl gap-5 md:grid-cols-2">
+          <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 text-left shadow-2xl">
+            <div className="mb-4 inline-flex rounded-full bg-emerald-500/15 px-3 py-1 text-sm font-semibold text-emerald-300">
+              Ücretsiz
             </div>
 
-            <p className="inline-flex rounded-full elegant-badge-gold px-3 py-1 text-xs font-semibold mt-6">
-              Sistem kontrol ediliyor
+            <h2 className="text-2xl font-bold">Solo Panel</h2>
+
+            <p className="mt-3 text-sm leading-6 text-neutral-300">
+              Bireysel dövme sanatçıları için sade rezervasyon, ödeme ve iş
+              takip paneli.
             </p>
 
-            <h1 className="text-3xl md:text-4xl font-black mt-5">
-              Tattoo Ticket Panel
-            </h1>
+            <ul className="mt-5 space-y-2 text-sm text-neutral-200">
+              <li>• 1 kullanıcı</li>
+              <li>• Rezervasyon oluşturma</li>
+              <li>• Ödeme ve kalan tutar takibi</li>
+              <li>• Görsel yükleme</li>
+              <li>• Aylık takvim</li>
+            </ul>
 
-            <p className="text-zinc-400 mt-3 text-sm md:text-base leading-relaxed">
-              Oturumun kontrol ediliyor. Giriş durumuna ve kullanıcı rolüne göre
-              doğru panele yönlendiriliyorsun.
+            <Link
+              href="/kayit/solo"
+              className="mt-6 inline-flex w-full items-center justify-center rounded-2xl bg-white px-5 py-3 text-sm font-bold text-neutral-950 transition hover:bg-neutral-200"
+            >
+              Ücretsiz Solo Panel Aç
+            </Link>
+          </div>
+
+          <div className="rounded-3xl border border-yellow-400/20 bg-yellow-400/[0.08] p-6 text-left shadow-2xl">
+            <div className="mb-4 inline-flex rounded-full bg-yellow-400/15 px-3 py-1 text-sm font-semibold text-yellow-300">
+              30 Gün Deneme
+            </div>
+
+            <h2 className="text-2xl font-bold">Stüdyo Paneli</h2>
+
+            <p className="mt-3 text-sm leading-6 text-neutral-300">
+              Tasarımcı, dövmeci ve admin rolleriyle çalışan profesyonel stüdyo
+              takip sistemi.
             </p>
 
-            <div className="mt-8 h-2 w-full rounded-full bg-white/5 overflow-hidden">
-              <div className="h-full w-1/2 rounded-full bg-gradient-to-r from-yellow-200 via-yellow-500 to-yellow-700 animate-pulse" />
-            </div>
+            <ul className="mt-5 space-y-2 text-sm text-neutral-200">
+              <li>• Çoklu kullanıcı</li>
+              <li>• Tasarımcı / dövmeci / admin panelleri</li>
+              <li>• Bilet ve ödeme yönetimi</li>
+              <li>• Raporlar ve ciro takibi</li>
+              <li>• Baskı / rezervasyon çıktısı</li>
+            </ul>
 
-            <div className="grid grid-cols-3 gap-3 mt-8">
-              <div className="rounded-2xl elegant-card-soft p-3">
-                <p className="text-[11px] text-zinc-500">Rol</p>
-                <p className="font-bold text-sm mt-1">Admin</p>
-              </div>
-
-              <div className="rounded-2xl elegant-card-soft p-3">
-                <p className="text-[11px] text-zinc-500">Panel</p>
-                <p className="font-bold text-sm mt-1">Tasarımcı</p>
-              </div>
-
-              <div className="rounded-2xl elegant-card-soft p-3">
-                <p className="text-[11px] text-zinc-500">Takip</p>
-                <p className="font-bold text-sm mt-1">Dövmeci</p>
-              </div>
-            </div>
+            <Link
+              href="/kayit/studyo"
+              className="mt-6 inline-flex w-full items-center justify-center rounded-2xl bg-yellow-400 px-5 py-3 text-sm font-bold text-neutral-950 transition hover:bg-yellow-300"
+            >
+              30 Gün Ücretsiz Dene
+            </Link>
           </div>
         </div>
-      </div>
+
+        <Link
+          href="/login"
+          className="mt-8 text-sm font-medium text-neutral-400 underline-offset-4 hover:text-white hover:underline"
+        >
+          Zaten hesabım var, giriş yap
+        </Link>
+      </section>
     </main>
   );
 }
