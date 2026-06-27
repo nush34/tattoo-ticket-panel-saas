@@ -9,7 +9,7 @@ export default function HomePage() {
         </div>
 
         <h1 className="max-w-4xl text-4xl font-bold tracking-tight md:text-6xl">
-          Dövme randevulerini, ödemeleri ve işleri tek panelden takip et.
+          Dövme randevularını, ödemeleri ve işleri tek panelden takip et.
         </h1>
 
         <p className="mt-6 max-w-2xl text-base leading-7 text-neutral-300 md:text-lg">
