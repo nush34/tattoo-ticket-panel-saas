@@ -6,8 +6,6 @@ import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "../lib/supabase/client";
 import { getCurrentStudio, type CurrentStudio } from "../lib/saas/studio";
 
-
-
 type StudioSettings = {
   studio_name: string | null;
   logo_url: string | null;
@@ -21,15 +19,15 @@ export default function AppNavbar() {
   const [settings, setSettings] = useState<StudioSettings | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const isPublicPage =
-  pathname === "/" ||
-  pathname === "/login" ||
-  pathname === "/abonelik" ||
-  pathname === "/uyelik-satin-al" ||
-  pathname.startsWith("/kayit");
+  const hideNavbar =
+    pathname === "/" ||
+    pathname === "/login" ||
+    pathname === "/abonelik" ||
+    pathname === "/uyelik-satin-al" ||
+    pathname.startsWith("/kayit");
 
   useEffect(() => {
-    if (isPublicPage) {
+    if (hideNavbar) {
       setLoading(false);
       return;
     }
@@ -48,7 +46,7 @@ export default function AppNavbar() {
         handleSettingsUpdated
       );
     };
-  }, [pathname]);
+  }, [pathname, hideNavbar]);
 
   async function loadNavbar() {
     setLoading(true);
@@ -83,7 +81,7 @@ export default function AppNavbar() {
     router.refresh();
   }
 
-  if (isPublicPage) {
+  if (hideNavbar) {
     return null;
   }
 
@@ -103,6 +101,8 @@ export default function AppNavbar() {
 
   const logoUrl = settings?.logo_url;
 
+  const homeHref = isIndividual ? "/solo-panel" : "/admin-panel";
+
   const linkClass = (href: string) =>
     `rounded-xl px-3 py-2 text-sm font-semibold transition ${
       pathname === href
@@ -113,34 +113,29 @@ export default function AppNavbar() {
   return (
     <header className="sticky top-0 z-50 border-b border-white/10 bg-neutral-950/90 backdrop-blur">
       <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 md:flex-row md:items-center md:justify-between">
-        <div className="flex items-center gap-3">
-          <Link
-            href={isIndividual ? "/solo-panel" : "/admin-panel"}
-            className="flex items-center gap-3"
-          >
-            <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-2xl bg-yellow-400 text-sm font-black text-neutral-950">
-              {logoUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={logoUrl}
-                  alt={studioDisplayName}
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                "TP"
-              )}
-            </div>
+        <Link href={homeHref} className="flex items-center gap-3">
+          <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl bg-yellow-400 text-sm font-black text-neutral-950">
+            {logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={logoUrl}
+                alt={studioDisplayName}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              "TP"
+            )}
+          </div>
 
-            <div>
-              <div className="text-sm font-bold text-white">
-                {studioDisplayName}
-              </div>
-              <div className="text-xs text-neutral-400">
-                {isIndividual ? "Bireysel Solo Panel" : "Stüdyo Paneli"}
-              </div>
+          <div>
+            <div className="text-sm font-black text-white">
+              {studioDisplayName}
             </div>
-          </Link>
-        </div>
+            <div className="text-xs text-neutral-400">
+              {isIndividual ? "Bireysel Solo Panel" : "Stüdyo Paneli"}
+            </div>
+          </div>
+        </Link>
 
         <nav className="flex flex-wrap items-center gap-2">
           {isIndividual ? (
