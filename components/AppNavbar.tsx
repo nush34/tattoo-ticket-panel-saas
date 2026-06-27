@@ -6,6 +6,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "../lib/supabase/client";
 import { getCurrentStudio, type CurrentStudio } from "../lib/saas/studio";
 
+
+
 type StudioSettings = {
   studio_name: string | null;
   logo_url: string | null;
@@ -20,9 +22,11 @@ export default function AppNavbar() {
   const [loading, setLoading] = useState(true);
 
   const isPublicPage =
-    pathname === "/" ||
-    pathname === "/login" ||
-    pathname.startsWith("/kayit");
+  pathname === "/" ||
+  pathname === "/login" ||
+  pathname === "/abonelik" ||
+  pathname === "/uyelik-satin-al" ||
+  pathname.startsWith("/kayit");
 
   useEffect(() => {
     if (isPublicPage) {

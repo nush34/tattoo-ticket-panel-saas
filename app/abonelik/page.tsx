@@ -326,3 +326,18 @@ export default function SubscriptionPage() {
     </main>
   );
 }
+<div className="mt-8 rounded-3xl border border-yellow-400/20 bg-yellow-400/[0.08] p-6">
+  <h2 className="text-xl font-black text-white">Panel erişimini tekrar aç</h2>
+
+  <p className="mt-2 text-sm leading-6 text-neutral-300">
+    Üyeliğini yenileyerek panel erişimini tekrar aktif hale getirebilirsin.
+    Ödeme tamamlandıktan sonra hesabın Super Admin tarafından aktif edilir.
+  </p>
+
+  <a
+    href="/uyelik-satin-al"
+    className="mt-5 inline-flex w-full items-center justify-center rounded-2xl bg-yellow-400 px-5 py-3 text-sm font-black text-neutral-950 transition hover:bg-yellow-300 md:w-auto"
+  >
+    Üyelik Satın Al
+  </a>
+</div>
