@@ -222,7 +222,8 @@ export default function StudioPrintSettings() {
       setSuccessMessage("Stüdyo ve çıktı ayarları güncellendi.");
       setSaving(false);
 
-      window.dispatchEvent(new Event("studio-settings-updated"));
+      setSuccessMessage("Ayarlar kaydedildi.");
+window.dispatchEvent(new Event("studio-settings-updated"));
 
       await loadSettings();
     } catch (error) {

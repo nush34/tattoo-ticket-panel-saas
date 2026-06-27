@@ -11,6 +11,41 @@ type StudioSettings = {
   logo_url: string | null;
 };
 
+function addCacheBuster(url: string) {
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}v=${Date.now()}`;
+}
+
+async function resolveNavbarLogo(
+  supabase: ReturnType<typeof createClient>,
+  rawLogoUrl: string | null
+) {
+  if (!rawLogoUrl) return null;
+
+  const cleanValue = rawLogoUrl.trim();
+
+  if (!cleanValue) return null;
+
+  if (cleanValue.startsWith("http://") || cleanValue.startsWith("https://")) {
+    return addCacheBuster(cleanValue);
+  }
+
+  const storagePath = cleanValue
+    .replace(/^studio-assets\//, "")
+    .replace(/^\/+/, "");
+
+  const { data, error } = await supabase.storage
+    .from("studio-assets")
+    .createSignedUrl(storagePath, 60 * 60);
+
+  if (error) {
+    console.error("Navbar logo signed url error:", error.message);
+    return null;
+  }
+
+  return data?.signedUrl ? addCacheBuster(data.signedUrl) : null;
+}
+
 export default function AppNavbar() {
   const pathname = usePathname();
   const router = useRouter();
@@ -18,6 +53,7 @@ export default function AppNavbar() {
   const [currentStudio, setCurrentStudio] = useState<CurrentStudio | null>(null);
   const [settings, setSettings] = useState<StudioSettings | null>(null);
   const [loading, setLoading] = useState(true);
+  const [logoSrc, setLogoSrc] = useState<string | null>(null);
 
   const hideNavbar =
     pathname === "/" ||
@@ -55,9 +91,10 @@ export default function AppNavbar() {
 
     if (!studio) {
       setCurrentStudio(null);
-      setSettings(null);
-      setLoading(false);
-      return;
+setSettings(null);
+setLogoSrc(null);
+setLoading(false);
+return;
     }
 
     setCurrentStudio(studio);
@@ -65,13 +102,16 @@ export default function AppNavbar() {
     const supabase = createClient();
 
     const { data } = await supabase
-      .from("studio_settings")
-      .select("studio_name, logo_url")
-      .eq("studio_id", studio.studio_id)
-      .maybeSingle();
+  .from("studio_settings")
+  .select("studio_name, logo_url")
+  .eq("studio_id", studio.studio_id)
+  .maybeSingle();
 
-    setSettings(data || null);
-    setLoading(false);
+const nextLogoSrc = await resolveNavbarLogo(supabase, data?.logo_url || null);
+
+setSettings(data || null);
+setLogoSrc(nextLogoSrc);
+setLoading(false);
   }
 
   async function handleLogout() {
@@ -99,7 +139,7 @@ export default function AppNavbar() {
   const studioDisplayName =
     settings?.studio_name || currentStudio.studio_name || "Tattoo Panel";
 
-  const logoUrl = settings?.logo_url;
+  const logoUrl = logoSrc;
 
   const homeHref = isIndividual ? "/solo-panel" : "/admin-panel";
 
@@ -116,15 +156,15 @@ export default function AppNavbar() {
         <Link href={homeHref} className="flex items-center gap-3">
           <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl bg-yellow-400 text-sm font-black text-neutral-950">
             {logoUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={logoUrl}
-                alt={studioDisplayName}
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              "TP"
-            )}
+  // eslint-disable-next-line @next/next/no-img-element
+  <img
+    src={logoUrl}
+    alt={studioDisplayName}
+    className="h-full w-full object-cover"
+  />
+) : (
+  "TP"
+)}
           </div>
 
           <div>
