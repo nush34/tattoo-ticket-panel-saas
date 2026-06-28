@@ -35,7 +35,7 @@ export default function TicketImagePreview({
 
   if (!rawImageUrl) {
     return (
-      <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-white/10 bg-neutral-900 text-xs text-neutral-500">
+      <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-neutral-900 text-center text-[11px] text-neutral-500">
         Görsel yok
       </div>
     );
@@ -43,7 +43,7 @@ export default function TicketImagePreview({
 
   if (!imageUrl) {
     return (
-      <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-white/10 bg-neutral-900 text-xs text-neutral-500">
+      <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-neutral-900 text-center text-[11px] text-neutral-500">
         Yükleniyor
       </div>
     );
@@ -54,7 +54,7 @@ export default function TicketImagePreview({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="group h-20 w-20 overflow-hidden rounded-2xl border border-white/10 bg-neutral-900"
+        className="group h-20 w-20 shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-neutral-900"
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
@@ -66,11 +66,11 @@ export default function TicketImagePreview({
 
       {open ? (
         <div
-          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4"
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/85 p-4"
           onClick={() => setOpen(false)}
         >
           <div
-            className="relative max-h-[90vh] max-w-5xl overflow-hidden rounded-3xl border border-white/10 bg-neutral-950 p-3"
+            className="relative max-h-[92vh] max-w-6xl overflow-hidden rounded-3xl border border-white/10 bg-neutral-950 p-3 shadow-2xl"
             onClick={(event) => event.stopPropagation()}
           >
             <button
@@ -85,7 +85,7 @@ export default function TicketImagePreview({
             <img
               src={imageUrl}
               alt={alt}
-              className="max-h-[85vh] max-w-full rounded-2xl object-contain"
+              className="max-h-[86vh] max-w-full rounded-2xl object-contain"
             />
           </div>
         </div>
