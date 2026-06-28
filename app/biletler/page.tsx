@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import TicketImagePreview from "../../components/TicketImagePreview";
 import { createClient } from "../../lib/supabase/client";
 import {
   CurrentStudio,
