@@ -9,7 +9,12 @@ import { getCurrentStudio, type CurrentStudio } from "../lib/saas/studio";
 type StudioSettings = {
   studio_name: string | null;
   logo_url: string | null;
+  theme_color?: string | null;
 };
+
+function isValidHexColor(value: string | null | undefined) {
+  return /^#([0-9A-F]{3}){1,2}$/i.test(value || "");
+}
 
 function addCacheBuster(url: string) {
   const separator = url.includes("?") ? "&" : "?";
@@ -52,8 +57,9 @@ export default function AppNavbar() {
 
   const [currentStudio, setCurrentStudio] = useState<CurrentStudio | null>(null);
   const [settings, setSettings] = useState<StudioSettings | null>(null);
-  const [loading, setLoading] = useState(true);
   const [logoSrc, setLogoSrc] = useState<string | null>(null);
+  const [themeColor, setThemeColor] = useState("#facc15");
+  const [loading, setLoading] = useState(true);
 
   const hideNavbar =
     pathname === "/" ||
@@ -82,6 +88,7 @@ export default function AppNavbar() {
         handleSettingsUpdated
       );
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname, hideNavbar]);
 
   async function loadNavbar() {
@@ -91,27 +98,46 @@ export default function AppNavbar() {
 
     if (!studio) {
       setCurrentStudio(null);
-setSettings(null);
-setLogoSrc(null);
-setLoading(false);
-return;
+      setSettings(null);
+      setLogoSrc(null);
+      setThemeColor("#facc15");
+      setLoading(false);
+      return;
     }
 
     setCurrentStudio(studio);
 
     const supabase = createClient();
 
-    const { data } = await supabase
-  .from("studio_settings")
-  .select("studio_name, logo_url")
-  .eq("studio_id", studio.studio_id)
-  .maybeSingle();
+    const { data, error } = await supabase
+      .from("studio_settings")
+      .select("studio_name, logo_url, theme_color")
+      .eq("studio_id", studio.studio_id)
+      .maybeSingle();
 
-const nextLogoSrc = await resolveNavbarLogo(supabase, data?.logo_url || null);
+    if (error) {
+      console.error("Navbar settings error:", error.message);
 
-setSettings(data || null);
-setLogoSrc(nextLogoSrc);
-setLoading(false);
+      setSettings(null);
+      setLogoSrc(null);
+      setThemeColor("#facc15");
+      setLoading(false);
+      return;
+    }
+
+    const nextLogoSrc = await resolveNavbarLogo(
+      supabase,
+      data?.logo_url || null
+    );
+
+    const nextThemeColor = isValidHexColor(data?.theme_color)
+      ? data!.theme_color!
+      : "#facc15";
+
+    setSettings(data || null);
+    setLogoSrc(nextLogoSrc);
+    setThemeColor(nextThemeColor);
+    setLoading(false);
   }
 
   async function handleLogout() {
@@ -139,32 +165,44 @@ setLoading(false);
   const studioDisplayName =
     settings?.studio_name || currentStudio.studio_name || "Tattoo Panel";
 
-  const logoUrl = logoSrc;
-
   const homeHref = isIndividual ? "/solo-panel" : "/admin-panel";
 
-  const linkClass = (href: string) =>
-    `rounded-xl px-3 py-2 text-sm font-semibold transition ${
-      pathname === href
-        ? "bg-yellow-400 text-neutral-950"
+  function linkClass(href: string) {
+    const isActive = pathname === href;
+
+    return `rounded-xl px-3 py-2 text-sm font-semibold transition ${
+      isActive
+        ? "text-neutral-950"
         : "text-neutral-200 hover:bg-white/10 hover:text-white"
     }`;
+  }
+
+  function linkStyle(href: string) {
+    if (pathname !== href) return undefined;
+
+    return {
+      backgroundColor: themeColor,
+    };
+  }
 
   return (
     <header className="sticky top-0 z-50 border-b border-white/10 bg-neutral-950/90 backdrop-blur">
       <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 md:flex-row md:items-center md:justify-between">
         <Link href={homeHref} className="flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl bg-yellow-400 text-sm font-black text-neutral-950">
-            {logoUrl ? (
-  // eslint-disable-next-line @next/next/no-img-element
-  <img
-    src={logoUrl}
-    alt={studioDisplayName}
-    className="h-full w-full object-cover"
-  />
-) : (
-  "TP"
-)}
+          <div
+            className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl text-sm font-black text-neutral-950"
+            style={{ backgroundColor: themeColor }}
+          >
+            {logoSrc ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={logoSrc}
+                alt={studioDisplayName}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              "TP"
+            )}
           </div>
 
           <div>
@@ -180,11 +218,19 @@ setLoading(false);
         <nav className="flex flex-wrap items-center gap-2">
           {isIndividual ? (
             <>
-              <Link href="/solo-panel" className={linkClass("/solo-panel")}>
+              <Link
+                href="/solo-panel"
+                className={linkClass("/solo-panel")}
+                style={linkStyle("/solo-panel")}
+              >
                 Solo Panel
               </Link>
 
-              <Link href="/ayarlar" className={linkClass("/ayarlar")}>
+              <Link
+                href="/ayarlar"
+                className={linkClass("/ayarlar")}
+                style={linkStyle("/ayarlar")}
+              >
                 Ayarlar
               </Link>
             </>
@@ -192,27 +238,51 @@ setLoading(false);
             <>
               {(role === "owner" || role === "admin") && (
                 <>
-                  <Link href="/admin-panel" className={linkClass("/admin-panel")}>
+                  <Link
+                    href="/admin-panel"
+                    className={linkClass("/admin-panel")}
+                    style={linkStyle("/admin-panel")}
+                  >
                     Admin Panel
                   </Link>
 
-                  <Link href="/yeni-bilet" className={linkClass("/yeni-bilet")}>
+                  <Link
+                    href="/yeni-bilet"
+                    className={linkClass("/yeni-bilet")}
+                    style={linkStyle("/yeni-bilet")}
+                  >
                     Yeni Bilet
                   </Link>
 
-                  <Link href="/biletler" className={linkClass("/biletler")}>
+                  <Link
+                    href="/biletler"
+                    className={linkClass("/biletler")}
+                    style={linkStyle("/biletler")}
+                  >
                     Biletler
                   </Link>
 
-                  <Link href="/takvim" className={linkClass("/takvim")}>
+                  <Link
+                    href="/takvim"
+                    className={linkClass("/takvim")}
+                    style={linkStyle("/takvim")}
+                  >
                     Takvim
                   </Link>
 
-                  <Link href="/raporlar" className={linkClass("/raporlar")}>
+                  <Link
+                    href="/raporlar"
+                    className={linkClass("/raporlar")}
+                    style={linkStyle("/raporlar")}
+                  >
                     Raporlar
                   </Link>
 
-                  <Link href="/ayarlar" className={linkClass("/ayarlar")}>
+                  <Link
+                    href="/ayarlar"
+                    className={linkClass("/ayarlar")}
+                    style={linkStyle("/ayarlar")}
+                  >
                     Ayarlar
                   </Link>
                 </>
@@ -223,19 +293,32 @@ setLoading(false);
                   <Link
                     href="/tasarimci-panel"
                     className={linkClass("/tasarimci-panel")}
+                    style={linkStyle("/tasarimci-panel")}
                   >
                     Tasarımcı Paneli
                   </Link>
 
-                  <Link href="/yeni-bilet" className={linkClass("/yeni-bilet")}>
+                  <Link
+                    href="/yeni-bilet"
+                    className={linkClass("/yeni-bilet")}
+                    style={linkStyle("/yeni-bilet")}
+                  >
                     Yeni Bilet
                   </Link>
 
-                  <Link href="/biletler" className={linkClass("/biletler")}>
+                  <Link
+                    href="/biletler"
+                    className={linkClass("/biletler")}
+                    style={linkStyle("/biletler")}
+                  >
                     Biletler
                   </Link>
 
-                  <Link href="/takvim" className={linkClass("/takvim")}>
+                  <Link
+                    href="/takvim"
+                    className={linkClass("/takvim")}
+                    style={linkStyle("/takvim")}
+                  >
                     Takvim
                   </Link>
                 </>
@@ -246,11 +329,16 @@ setLoading(false);
                   <Link
                     href="/dovmeci-panel"
                     className={linkClass("/dovmeci-panel")}
+                    style={linkStyle("/dovmeci-panel")}
                   >
                     Dövmeci Paneli
                   </Link>
 
-                  <Link href="/takvim" className={linkClass("/takvim")}>
+                  <Link
+                    href="/takvim"
+                    className={linkClass("/takvim")}
+                    style={linkStyle("/takvim")}
+                  >
                     Takvim
                   </Link>
                 </>
