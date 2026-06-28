@@ -9,11 +9,48 @@ import { getCurrentStudio, type CurrentStudio } from "../lib/saas/studio";
 type StudioSettings = {
   studio_name: string | null;
   logo_url: string | null;
-  theme_color?: string | null;
+  theme_color: string | null;
 };
 
 function isValidHexColor(value: string | null | undefined) {
   return /^#([0-9A-F]{3}){1,2}$/i.test(value || "");
+}
+
+function hexToRgb(hex: string) {
+  const cleanHex = hex.replace("#", "");
+
+  const fullHex =
+    cleanHex.length === 3
+      ? cleanHex
+          .split("")
+          .map((char) => char + char)
+          .join("")
+      : cleanHex;
+
+  const numberValue = parseInt(fullHex, 16);
+
+  return {
+    r: (numberValue >> 16) & 255,
+    g: (numberValue >> 8) & 255,
+    b: numberValue & 255,
+  };
+}
+
+function applyThemeVariables(themeColor: string) {
+  if (typeof document === "undefined") return;
+
+  const finalColor = isValidHexColor(themeColor) ? themeColor : "#facc15";
+  const rgb = hexToRgb(finalColor);
+
+  document.documentElement.style.setProperty(
+    "--studio-theme-color",
+    finalColor
+  );
+
+  document.documentElement.style.setProperty(
+    "--studio-theme-color-rgb",
+    `${rgb.r} ${rgb.g} ${rgb.b}`
+  );
 }
 
 function addCacheBuster(url: string) {
@@ -70,6 +107,7 @@ export default function AppNavbar() {
 
   useEffect(() => {
     if (hideNavbar) {
+      applyThemeVariables("#facc15");
       setLoading(false);
       return;
     }
@@ -101,6 +139,7 @@ export default function AppNavbar() {
       setSettings(null);
       setLogoSrc(null);
       setThemeColor("#facc15");
+      applyThemeVariables("#facc15");
       setLoading(false);
       return;
     }
@@ -121,6 +160,7 @@ export default function AppNavbar() {
       setSettings(null);
       setLogoSrc(null);
       setThemeColor("#facc15");
+      applyThemeVariables("#facc15");
       setLoading(false);
       return;
     }
@@ -137,12 +177,14 @@ export default function AppNavbar() {
     setSettings(data || null);
     setLogoSrc(nextLogoSrc);
     setThemeColor(nextThemeColor);
+    applyThemeVariables(nextThemeColor);
     setLoading(false);
   }
 
   async function handleLogout() {
     const supabase = createClient();
     await supabase.auth.signOut();
+    applyThemeVariables("#facc15");
     router.push("/login");
     router.refresh();
   }

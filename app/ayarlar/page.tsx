@@ -6,7 +6,6 @@ import { createClient } from "../../lib/supabase/client";
 import { getCurrentStudio, type CurrentStudio } from "../../lib/saas/studio";
 
 type StudioSettings = {
-  id?: string;
   studio_id: string;
   studio_name: string | null;
   logo_url: string | null;
@@ -22,6 +21,43 @@ type StudioSettings = {
 
 function isValidHexColor(value: string) {
   return /^#([0-9A-F]{3}){1,2}$/i.test(value);
+}
+
+function hexToRgb(hex: string) {
+  const cleanHex = hex.replace("#", "");
+
+  const fullHex =
+    cleanHex.length === 3
+      ? cleanHex
+          .split("")
+          .map((char) => char + char)
+          .join("")
+      : cleanHex;
+
+  const numberValue = parseInt(fullHex, 16);
+
+  return {
+    r: (numberValue >> 16) & 255,
+    g: (numberValue >> 8) & 255,
+    b: numberValue & 255,
+  };
+}
+
+function applyThemeVariables(themeColor: string) {
+  if (typeof document === "undefined") return;
+
+  const finalColor = isValidHexColor(themeColor) ? themeColor : "#facc15";
+  const rgb = hexToRgb(finalColor);
+
+  document.documentElement.style.setProperty(
+    "--studio-theme-color",
+    finalColor
+  );
+
+  document.documentElement.style.setProperty(
+    "--studio-theme-color-rgb",
+    `${rgb.r} ${rgb.g} ${rgb.b}`
+  );
 }
 
 function addCacheBuster(url: string) {
@@ -63,7 +99,7 @@ export default function AyarlarPage() {
   const router = useRouter();
 
   const [currentStudio, setCurrentStudio] = useState<CurrentStudio | null>(null);
-  const [settingsId, setSettingsId] = useState<string | null>(null);
+  const [hasSettings, setHasSettings] = useState(false);
 
   const [studioName, setStudioName] = useState("");
   const [phone, setPhone] = useState("");
@@ -93,6 +129,7 @@ export default function AyarlarPage() {
 
   useEffect(() => {
     loadSettings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function loadSettings() {
@@ -124,7 +161,6 @@ export default function AyarlarPage() {
       .from("studio_settings")
       .select(
         `
-        id,
         studio_id,
         studio_name,
         logo_url,
@@ -149,7 +185,7 @@ export default function AyarlarPage() {
 
     const loadedSettings = data as StudioSettings | null;
 
-    setSettingsId(loadedSettings?.id || null);
+    setHasSettings(Boolean(loadedSettings));
 
     setStudioName(loadedSettings?.studio_name || studio.studio_name || "");
     setPhone(loadedSettings?.phone || "");
@@ -173,6 +209,7 @@ export default function AyarlarPage() {
       : "#facc15";
 
     setThemeColor(loadedThemeColor);
+    applyThemeVariables(loadedThemeColor);
 
     const loadedLogoUrl = loadedSettings?.logo_url || null;
     setLogoUrl(loadedLogoUrl);
@@ -181,6 +218,14 @@ export default function AyarlarPage() {
     setLogoPreviewUrl(previewUrl);
 
     setLoading(false);
+  }
+
+  function handleThemeColorChange(nextColor: string) {
+    setThemeColor(nextColor);
+
+    if (isValidHexColor(nextColor)) {
+      applyThemeVariables(nextColor);
+    }
   }
 
   function handleLogoFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -231,7 +276,9 @@ export default function AyarlarPage() {
 
     try {
       if (!isValidHexColor(themeColor)) {
-        setErrorMessage("Tema rengi geçerli bir HEX renk kodu olmalı. Örn: #facc15");
+        setErrorMessage(
+          "Tema rengi geçerli bir HEX renk kodu olmalı. Örn: #facc15"
+        );
         setSaving(false);
         return;
       }
@@ -258,13 +305,13 @@ export default function AyarlarPage() {
         theme_color: themeColor,
       };
 
-      let saveError = null;
+      let saveError: any = null;
 
-      if (settingsId) {
+      if (hasSettings) {
         const { error } = await supabase
           .from("studio_settings")
           .update(payload)
-          .eq("id", settingsId);
+          .eq("studio_id", currentStudio.studio_id);
 
         saveError = error;
       } else {
@@ -281,9 +328,12 @@ export default function AyarlarPage() {
 
       setLogoUrl(nextLogoUrl);
       setLogoFile(null);
+      setHasSettings(true);
 
       const previewUrl = await resolveLogoPreview(supabase, nextLogoUrl);
       setLogoPreviewUrl(previewUrl);
+
+      applyThemeVariables(themeColor);
 
       setSuccessMessage("Ayarlar kaydedildi.");
       window.dispatchEvent(new Event("studio-settings-updated"));
@@ -295,7 +345,7 @@ export default function AyarlarPage() {
     }
   }
 
-  async function handleRemoveLogo() {
+  function handleRemoveLogo() {
     setLogoFile(null);
     setLogoUrl(null);
     setLogoPreviewUrl(null);
@@ -379,20 +429,25 @@ export default function AyarlarPage() {
                   <input
                     type="color"
                     value={themeColor}
-                    onChange={(event) => setThemeColor(event.target.value)}
+                    onChange={(event) =>
+                      handleThemeColorChange(event.target.value)
+                    }
                     className="h-12 w-16 cursor-pointer rounded-xl border border-white/10 bg-neutral-900"
                   />
 
                   <input
                     value={themeColor}
-                    onChange={(event) => setThemeColor(event.target.value)}
+                    onChange={(event) =>
+                      handleThemeColorChange(event.target.value)
+                    }
                     className="w-full rounded-2xl border border-white/10 bg-neutral-900 px-4 py-3 text-sm text-white outline-none focus:border-yellow-400"
                     placeholder="#facc15"
                   />
                 </div>
 
                 <p className="mt-2 text-xs text-neutral-500">
-                  Bu renk navbar logo kutusunda ve aktif menü renginde kullanılır.
+                  Bu renk navbar, aktif menüler, butonlar ve panel vurgularında
+                  kullanılır.
                 </p>
               </div>
             </div>
@@ -588,7 +643,8 @@ export default function AyarlarPage() {
           <div className="sticky bottom-4 z-20 rounded-3xl border border-white/10 bg-neutral-950/90 p-4 backdrop-blur">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div className="text-sm text-neutral-400">
-                Değişiklikleri kaydettiğinde navbar ve baskı ayarları güncellenir.
+                Değişiklikleri kaydettiğinde navbar, logo ve tema rengi
+                güncellenir.
               </div>
 
               <button
