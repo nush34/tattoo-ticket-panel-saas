@@ -4,578 +4,661 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "../../../../lib/supabase/client";
 import {
-  CurrentStudio,
   getCurrentStudio,
   getPanelPathByRole,
+  type CurrentStudio,
 } from "../../../../lib/saas/studio";
 
-type SourceType = "kapi_musterisi" | "sosyal_medya";
-type TicketStatus = "bekliyor" | "yapildi" | "iptal";
-
-type Payment = {
+type StudioStaffMember = {
   id: string;
-  odeme_tarihi: string;
-  odeme_tutari: number;
-  odeme_yontemi: "nakit" | "kart" | null;
-};
-
-type TicketDetailRow = {
-  ticket_id: string;
-  ticket_no: string;
-  studio_id: string;
-  customer_name: string;
-  customer_phone: string | null;
-  source: SourceType;
-  tattoo_date: string;
-  appointment_time: string | null;
-  status: TicketStatus;
-  has_guarantee: boolean;
-  created_at: string;
-  designer_member_id: string | null;
-  designer_name: string | null;
-  designer_email: string | null;
-  artist_member_id: string | null;
-  artist_name: string | null;
-  artist_email: string | null;
-  price: number;
-  image_url: string | null;
-  designer_note: string | null;
-  payments: Payment[] | null;
-  refreshes: unknown[] | null;
-  price_history: unknown[] | null;
+  full_name: string | null;
+  email: string | null;
+  role: string | null;
+  is_active: boolean | null;
 };
 
 type StudioSettings = {
-  studio_id: string;
+  studio_name: string | null;
   logo_url: string | null;
-  watermark_enabled: boolean;
   phone: string | null;
   instagram: string | null;
   address: string | null;
   print_footer_text: string | null;
+  watermark_enabled: boolean | null;
+  theme_color: string | null;
 };
 
-function formatDateNumeric(value?: string | null) {
-  if (!value) return "-";
-  const [year, month, day] = value.slice(0, 10).split("-").map(Number);
-  if (!year || !month || !day) return value;
-  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+type TicketRow = Record<string, any>;
+
+function addCacheBuster(url: string) {
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}v=${Date.now()}`;
 }
 
-function formatDateLong(value?: string | null) {
+async function resolveStorageImageUrl(rawImageUrl: string | null) {
+  if (!rawImageUrl) return null;
+
+  const cleanValue = rawImageUrl.trim();
+
+  if (!cleanValue) return null;
+
+  if (cleanValue.startsWith("http://") || cleanValue.startsWith("https://")) {
+    return addCacheBuster(cleanValue);
+  }
+
+  const storagePath = cleanValue
+    .replace(/^studio-assets\//, "")
+    .replace(/^\/+/, "");
+
+  const supabase = createClient();
+
+  const { data, error } = await supabase.storage
+    .from("studio-assets")
+    .createSignedUrl(storagePath, 60 * 60);
+
+  if (error) {
+    console.error("Print logo signed url error:", error.message);
+    return null;
+  }
+
+  return data?.signedUrl ? addCacheBuster(data.signedUrl) : null;
+}
+
+async function getStudioStaff(studioId: string): Promise<StudioStaffMember[]> {
+  const supabase = createClient();
+
+  const { data, error } = await supabase
+    .from("studio_members")
+    .select("id, full_name, email, role, is_active")
+    .eq("studio_id", studioId)
+    .eq("is_active", true)
+    .order("full_name", { ascending: true });
+
+  if (error) {
+    console.error("getStudioStaff error:", error.message);
+    return [];
+  }
+
+  return (data || []) as StudioStaffMember[];
+}
+
+function getValue(row: TicketRow | null, keys: string[]) {
+  if (!row) return null;
+
+  for (const key of keys) {
+    if (row[key] !== undefined && row[key] !== null && row[key] !== "") {
+      return row[key];
+    }
+  }
+
+  return null;
+}
+
+function getText(row: TicketRow | null, keys: string[], fallback = "-") {
+  const value = getValue(row, keys);
+
+  if (value === null || value === undefined || value === "") {
+    return fallback;
+  }
+
+  return String(value);
+}
+
+function getNumber(row: TicketRow | null, keys: string[]) {
+  const value = getValue(row, keys);
+  const numberValue = Number(value || 0);
+
+  if (Number.isNaN(numberValue)) return 0;
+
+  return numberValue;
+}
+
+function formatCurrency(value: number | null | undefined) {
+  const safeValue = Number(value || 0);
+
+  return new Intl.NumberFormat("tr-TR", {
+    style: "currency",
+    currency: "TRY",
+    maximumFractionDigits: 2,
+  }).format(safeValue);
+}
+
+function formatDate(value: string | null | undefined) {
   if (!value) return "-";
-  const [year, month, day] = value.slice(0, 10).split("-").map(Number);
-  if (!year || !month || !day) return value;
-  return new Date(year, month - 1, day).toLocaleDateString("tr-TR", {
-    day: "numeric",
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleDateString("tr-TR", {
+    day: "2-digit",
     month: "long",
     year: "numeric",
   });
 }
 
-function formatTime(value?: string | null) {
+function formatShortDate(value: string | null | undefined) {
   if (!value) return "-";
-  return value.slice(0, 5);
-}
 
-function formatPrice(value?: number | null) {
-  return `${Number(value || 0).toLocaleString("tr-TR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}₺`;
-}
+  const date = new Date(value);
 
-function sourceLabel(source?: SourceType | null) {
-  if (source === "kapi_musterisi") return "Kapı müşterisi";
-  if (source === "sosyal_medya") return "Sosyal medya";
-  return "-";
-}
-
-function splitCustomerName(fullName?: string | null) {
-  const cleanName = (fullName || "").trim().replace(/\s+/g, " ");
-  if (!cleanName) return { firstName: "-", lastName: "-" };
-
-  const parts = cleanName.split(" ");
-
-  if (parts.length === 1) {
-    return { firstName: parts[0], lastName: "-" };
+  if (Number.isNaN(date.getTime())) {
+    return value;
   }
 
-  return {
-    firstName: parts.slice(0, -1).join(" "),
-    lastName: parts[parts.length - 1],
-  };
+  return date.toLocaleDateString("tr-TR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
 }
 
-export default function BiletPrintPage() {
-  const router = useRouter();
-  const params = useParams();
-  const rawId = params.id;
-  const ticketId = Array.isArray(rawId) ? rawId[0] : String(rawId || "");
+function normalizeSource(value: string | null | undefined) {
+  if (value === "sosyal_medya") return "Sosyal medya";
+  if (value === "kapi_musterisi") return "Kapı müşterisi";
+  if (value === "diger") return "Diğer";
+  return value || "-";
+}
 
-  const [studio, setStudio] = useState<CurrentStudio | null>(null);
+function normalizeStatus(value: string | null | undefined) {
+  if (value === "yapildi") return "Yapıldı";
+  if (value === "iptal") return "İptal";
+  return "Bekliyor";
+}
+
+export default function TicketPrintPage() {
+  const params = useParams();
+  const router = useRouter();
+
+  const ticketId = Array.isArray(params.id) ? params.id[0] : params.id;
+
+  const [currentStudio, setCurrentStudio] = useState<CurrentStudio | null>(null);
   const [settings, setSettings] = useState<StudioSettings | null>(null);
-  const [ticket, setTicket] = useState<TicketDetailRow | null>(null);
+  const [ticket, setTicket] = useState<TicketRow | null>(null);
+  const [staff, setStaff] = useState<StudioStaffMember[]>([]);
+  const [logoSrc, setLogoSrc] = useState<string | null>(null);
+
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
-    async function loadPrintData() {
-      setLoading(true);
-      setErrorMessage("");
+    loadPrintPage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ticketId]);
 
-      const supabase = createClient();
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+  async function loadPrintPage() {
+    setLoading(true);
+    setErrorMessage("");
 
-      if (!session) {
-        router.replace("/login");
-        return;
-      }
+    const supabase = createClient();
 
-      const currentStudio = await getCurrentStudio();
+    const studio = await getCurrentStudio();
 
-      if (!currentStudio) {
-        router.replace("/login");
-        return;
-      }
-
-      if (!["owner", "admin", "designer"].includes(currentStudio.role)) {
-        router.replace(getPanelPathByRole(currentStudio.role));
-        return;
-      }
-
-      setStudio(currentStudio);
-
-      const { data: settingsData } = await supabase
-        .from("studio_settings")
-        .select(
-          "studio_id, logo_url, watermark_enabled, phone, instagram, address, print_footer_text"
-        )
-        .eq("studio_id", currentStudio.studio_id)
-        .maybeSingle();
-
-      setSettings((settingsData || null) as StudioSettings | null);
-
-      const { data, error } = await supabase.rpc("get_bilet_detail_page", {
-        target_studio_id: currentStudio.studio_id,
-        target_ticket_id: ticketId,
-      });
-
-      if (error) {
-        setErrorMessage(error.message);
-        setLoading(false);
-        return;
-      }
-
-      const firstRow = Array.isArray(data) ? data[0] : null;
-
-      if (!firstRow) {
-        setErrorMessage("Bilet bulunamadı veya bu bilete erişim yetkin yok.");
-        setLoading(false);
-        return;
-      }
-
-      setTicket(firstRow as TicketDetailRow);
-      setLoading(false);
+    if (!studio) {
+      router.replace("/login");
+      return;
     }
 
-    loadPrintData();
-  }, [router, ticketId]);
+    if (
+      studio.account_type !== "individual" &&
+      (studio.studio_status === "suspended" ||
+        studio.studio_status === "cancelled")
+    ) {
+      router.replace("/abonelik");
+      return;
+    }
 
-  const paymentTotal = useMemo(() => {
-    return (ticket?.payments || []).reduce((total, payment) => {
-      return total + Number(payment.odeme_tutari || 0);
-    }, 0);
+    setCurrentStudio(studio);
+
+    const { data: settingsData, error: settingsError } = await supabase
+      .from("studio_settings")
+      .select(
+        `
+        studio_name,
+        logo_url,
+        phone,
+        instagram,
+        address,
+        print_footer_text,
+        watermark_enabled,
+        theme_color
+      `
+      )
+      .eq("studio_id", studio.studio_id)
+      .maybeSingle();
+
+    if (settingsError) {
+      setErrorMessage(settingsError.message);
+      setLoading(false);
+      return;
+    }
+
+    const loadedSettings = settingsData as StudioSettings | null;
+    setSettings(loadedSettings);
+
+    const resolvedLogo = await resolveStorageImageUrl(
+      loadedSettings?.logo_url || null
+    );
+
+    setLogoSrc(resolvedLogo);
+
+    const studioStaff = await getStudioStaff(studio.studio_id);
+    setStaff(studioStaff);
+
+    if (!ticketId) {
+      setErrorMessage("Bilet bulunamadı.");
+      setLoading(false);
+      return;
+    }
+
+    const { data: ticketData, error: ticketError } = await supabase
+  .from("tickets")
+  .select("*")
+  .eq("id", ticketId)
+  .eq("studio_id", studio.studio_id)
+  .maybeSingle();
+
+if (ticketError) {
+  setErrorMessage(ticketError.message);
+  setLoading(false);
+  return;
+}
+
+if (!ticketData) {
+  setErrorMessage("Bilet bulunamadı.");
+  setLoading(false);
+  return;
+}
+
+setTicket(ticketData);
+setLoading(false);
+  }
+
+  const designerName = useMemo(() => {
+    const designerId =
+      getValue(ticket, ["designer_member_id", "designer_id"]) || null;
+
+    const directName = getValue(ticket, [
+      "designer_name",
+      "tasarimci_name",
+      "designer_full_name",
+    ]);
+
+    if (directName) return String(directName);
+
+    const foundMember = staff.find(
+      (member: StudioStaffMember) => member.id === designerId
+    );
+
+    return foundMember?.full_name || "-";
+  }, [ticket, staff]);
+
+  const artistName = useMemo(() => {
+    const artistId = getValue(ticket, ["artist_member_id", "artist_id"]) || null;
+
+    const directName = getValue(ticket, [
+      "artist_name",
+      "dovmeci_name",
+      "artist_full_name",
+    ]);
+
+    if (directName) return String(directName);
+
+    const foundMember = staff.find(
+      (member: StudioStaffMember) => member.id === artistId
+    );
+
+    return foundMember?.full_name || "-";
+  }, [ticket, staff]);
+
+  const printData = useMemo(() => {
+    const customerName = getText(ticket, [
+      "customer_name",
+      "customer_full_name",
+      "client_name",
+      "name",
+      "isim",
+    ]);
+
+    const customerSurname = getText(
+      ticket,
+      ["customer_surname", "surname", "soyisim"],
+      "-"
+    );
+
+    const phone = getText(ticket, [
+      "customer_phone",
+      "phone",
+      "telephone",
+      "iletisim",
+    ]);
+
+    const appointmentDate = getText(ticket, [
+      "appointment_date",
+      "tattoo_date",
+      "ticket_date",
+      "date",
+      "randevu_tarihi",
+      "yapilacagi_tarih",
+    ]);
+
+    const appointmentTime = getText(ticket, [
+      "appointment_time",
+      "tattoo_time",
+      "time",
+      "saat",
+    ]);
+
+    const totalPrice = getNumber(ticket, [
+      "total_price",
+      "price",
+      "fiyat",
+      "toplam_fiyat",
+    ]);
+
+    const paidTotal = getNumber(ticket, [
+      "paid_total",
+      "deposit",
+      "kapora",
+      "payment_total",
+      "odenen",
+    ]);
+
+    const remainingTotal =
+      getValue(ticket, ["remaining_total", "rest", "kalan"]) !== null
+        ? getNumber(ticket, ["remaining_total", "rest", "kalan"])
+        : Math.max(totalPrice - paidTotal, 0);
+
+    const source = normalizeSource(
+      getText(ticket, ["source", "customer_source", "kaynak"], "-")
+    );
+
+    const status = normalizeStatus(
+      getText(ticket, ["status", "durum"], "bekliyor")
+    );
+
+    const ticketCode = getText(
+      ticket,
+      ["ticket_code", "code", "reservation_code", "id"],
+      "-"
+    );
+
+    return {
+      customerName,
+      customerSurname,
+      phone,
+      appointmentDate,
+      appointmentTime,
+      totalPrice,
+      paidTotal,
+      remainingTotal,
+      source,
+      status,
+      ticketCode,
+    };
   }, [ticket]);
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-zinc-950 text-white flex items-center justify-center p-6">
-        <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
-          <h1 className="text-2xl font-black">Çıktı hazırlanıyor...</h1>
-          <p className="text-zinc-400 mt-2">
-            Bilet ve stüdyo bilgileri yükleniyor.
-          </p>
+      <main className="min-h-screen bg-neutral-950 px-4 py-10 text-white">
+        <div className="mx-auto max-w-4xl rounded-3xl border border-white/10 bg-white/[0.04] p-6">
+          Çıktı hazırlanıyor...
         </div>
       </main>
     );
   }
 
-  if (errorMessage || !ticket || !studio) {
+  if (!currentStudio) {
+    return null;
+  }
+
+  if (errorMessage) {
     return (
-      <main className="min-h-screen bg-zinc-950 text-white flex items-center justify-center p-6">
-        <div className="rounded-3xl border border-red-500/30 bg-red-500/10 p-6 max-w-xl">
-          <h1 className="text-2xl font-black text-red-100">Çıktı açılamadı</h1>
-          <p className="text-red-100/80 mt-2">
-            {errorMessage || "Bilet bulunamadı."}
-          </p>
-          <button
-            type="button"
-            onClick={() => router.push("/biletler")}
-            className="mt-5 rounded-2xl bg-white px-5 py-3 font-bold text-black"
-          >
-            Bilet listesine dön
-          </button>
+      <main className="min-h-screen bg-neutral-950 px-4 py-10 text-white">
+        <div className="mx-auto max-w-4xl rounded-3xl border border-red-500/30 bg-red-500/10 p-6 text-red-200">
+          {errorMessage}
         </div>
       </main>
     );
   }
 
-  const logoUrl = settings?.logo_url || null;
-  const watermarkUrl = settings?.watermark_enabled ? logoUrl : null;
-  const footerText = settings?.print_footer_text || "";
-  const contactItems = [settings?.address, footerText, settings?.phone, settings?.instagram]
-    .filter(Boolean)
-    .join("  •  ");
+  if (!ticket) {
+    return (
+      <main className="min-h-screen bg-neutral-950 px-4 py-10 text-white">
+        <div className="mx-auto max-w-4xl rounded-3xl border border-white/10 bg-white/[0.04] p-6">
+          Bilet bulunamadı.
+        </div>
+      </main>
+    );
+  }
 
-  const remainingAmount = Number(ticket.price || 0) - paymentTotal;
-  const { firstName, lastName } = splitCustomerName(ticket.customer_name);
+  const studioName =
+    settings?.studio_name || currentStudio.studio_name || "Tattoo Panel";
+
+  const footerText =
+    settings?.print_footer_text ||
+    [
+      settings?.address,
+      settings?.phone ? `+90 ${settings.phone}` : "",
+      settings?.instagram,
+    ]
+      .filter(Boolean)
+      .join(" • ");
+
+  const showWatermark = settings?.watermark_enabled ?? true;
 
   return (
-    <main className="min-h-screen bg-zinc-950 text-white p-4 md:p-8 print:bg-white print:p-0">
-      <div className="no-print mx-auto mb-5 flex max-w-[210mm] flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-black">Bilet Çıktısı</h1>
-          <p className="text-sm text-zinc-400 mt-1">{ticket.ticket_no}</p>
-        </div>
-
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => router.push(`/biletler/${ticket.ticket_id}`)}
-            className="rounded-2xl border border-white/10 bg-white/5 px-5 py-3 font-semibold text-white hover:bg-white/10"
-          >
-            Detaya Dön
-          </button>
-
-          <button
-            type="button"
-            onClick={() => window.print()}
-            className="rounded-2xl bg-white px-5 py-3 font-black text-black"
-          >
-            Çıktı Al
-          </button>
-        </div>
-      </div>
-
-      <section className="print-area mx-auto bg-white text-black shadow-2xl print:shadow-none">
-        <div className="a4-sheet">
-          {watermarkUrl && (
-            <img src={watermarkUrl} alt="Watermark" className="watermark" />
-          )}
-
-          <header className="reservation-header">
-            <div className="logo-area">
-              {logoUrl ? (
-                <img src={logoUrl} alt={studio.studio_name} className="studio-logo" />
-              ) : (
-                <div className="logo-placeholder">{studio.studio_name}</div>
-              )}
-            </div>
-
-            <div className="title-area">
-              <h1>RESERVATION</h1>
-              <div className="title-line" />
-            </div>
-
-            <aside className="summary-card">
-              <SummaryItem label="İşlem" value="Dövme" />
-              <SummaryItem label="Tarih" value={formatDateLong(ticket.tattoo_date)} />
-              <SummaryItem
-                label="Sanatçı"
-                value={ticket.artist_name || "Sonradan atanacak"}
-              />
-              <SummaryItem label="ID" value={ticket.ticket_no} />
-            </aside>
-          </header>
-
-          <section className="reservation-info">
-            <InfoRow label="İsim:" value={firstName} />
-            <InfoRow label="Soyisim:" value={lastName} />
-            <InfoRow label="Tarih:" value={formatDateNumeric(ticket.tattoo_date)} />
-            <InfoRow label="Saat:" value={formatTime(ticket.appointment_time)} />
-            <InfoRow label="İletişim:" value={ticket.customer_phone || "-"} />
-            <InfoRow label="Fiyat:" value={formatPrice(ticket.price)} />
-            <InfoRow label="Depozito:" value={formatPrice(paymentTotal)} />
-            <InfoRow label="Rest:" value={formatPrice(remainingAmount)} />
-            <InfoRow label="Tasarımcı:" value={ticket.designer_name || "-"} />
-            <InfoRow label="Kaynak:" value={sourceLabel(ticket.source)} />
-          </section>
-
-          <section className="agreement-text">
-            <p>
-              <strong>1.</strong> Eseri yaptıran; deri ve dermatit enfeksiyonları,
-              diyabet, ateş ve ağır somatik hastalıklar, akne veya deri döküntüleri,
-              hamilelik, alerjik reaksiyonlar, epilepsi, kalp rahatsızlıkları gibi dövme
-              veya piercing yaptırmasına engel teşkil edebilecek bir rahatsızlığı
-              olmadığını; hamile veya emzirme döneminde olmadığını kabul ve beyan eder.
-            </p>
-
-            <p>
-              <strong>2.</strong> Eseri yaptıran; işbu iş ile taraflar arasında eserin
-              yapımı için belirlenen tarihteki randevusunu tamamen iptal etmesi veya
-              randevu saatinde habersiz olarak stüdyoya gelmemesi halinde ödemiş olduğu
-              depozito tutarını iade edemeyeceğini kabul ve taahhüt eder.
-            </p>
-
-            <p>
-              <strong>3.</strong> Eseri yaptıran; eserin fotoğraf, video ve kayıt
-              görüntülerinin alınabileceğini; bu görüntülerin stüdyonun sosyal medya
-              hesaplarında, web sitesinde ve tanıtım çalışmalarında kullanılabileceğini;
-              kişisel verilerinin ilgili mevzuat kapsamında işlenmesine açık rıza
-              verdiğini kabul eder.
-            </p>
-          </section>
-
-          <section className="signature-wrap">
-            <div className="signature-title">İMZA</div>
-            <div className="signature-line" />
-          </section>
-
-          <footer className="reservation-footer">
-            {contactItems || studio.studio_name}
-          </footer>
-        </div>
-      </section>
-
+    <>
       <style jsx global>{`
         @page {
           size: A4 portrait;
           margin: 0;
         }
 
+        html,
+        body {
+          background: #111111;
+        }
+
         @media print {
+          html,
           body {
-            margin: 0 !important;
             background: white !important;
-          }
-
-          body * {
-            visibility: hidden;
-          }
-
-          .print-area,
-          .print-area * {
-            visibility: visible;
-          }
-
-          .print-area {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 210mm;
           }
 
           .no-print {
             display: none !important;
           }
-        }
 
-        .print-area {
-          width: 210mm;
-          min-height: 297mm;
-        }
+          .print-page {
+            margin: 0 !important;
+            box-shadow: none !important;
+            border: none !important;
+          }
 
-        .a4-sheet {
-          position: relative;
-          width: 210mm;
-          min-height: 297mm;
-          padding: 13mm 9mm 8mm;
-          box-sizing: border-box;
-          overflow: hidden;
-          background: white;
-          color: #000;
-          font-family: Arial, Helvetica, sans-serif;
-        }
-
-        .watermark {
-          position: absolute;
-          left: 50%;
-          top: 48%;
-          width: 96mm;
-          max-height: 112mm;
-          transform: translate(-50%, -50%);
-          object-fit: contain;
-          opacity: 0.12;
-          z-index: 0;
-          pointer-events: none;
-        }
-
-        .reservation-header,
-        .reservation-info,
-        .agreement-text,
-        .signature-wrap,
-        .reservation-footer {
-          position: relative;
-          z-index: 1;
-        }
-
-        .reservation-header {
-          display: grid;
-          grid-template-columns: 54mm 1fr 54mm;
-          column-gap: 7mm;
-          align-items: start;
-          min-height: 78mm;
-        }
-
-        .logo-area {
-          display: flex;
-          justify-content: flex-start;
-          align-items: flex-start;
-        }
-
-        .studio-logo {
-          width: 48mm;
-          max-height: 38mm;
-          object-fit: contain;
-        }
-
-        .logo-placeholder {
-          width: 48mm;
-          min-height: 32mm;
-          display: grid;
-          place-items: center;
-          border: 1px solid #ddd;
-          font-size: 13pt;
-          font-weight: 900;
-          text-align: center;
-          padding: 2mm;
-        }
-
-        .title-area {
-          text-align: center;
-          padding-top: 3mm;
-        }
-
-        .title-area h1 {
-          margin: 0;
-          font-size: 20pt;
-          line-height: 1;
-          font-weight: 900;
-          letter-spacing: 0.01em;
-        }
-
-        .title-line {
-          width: 58mm;
-          height: 0.35mm;
-          background: #000;
-          margin: 5mm auto 0;
-        }
-
-        .summary-card {
-          width: 51mm;
-          min-height: 74mm;
-          box-sizing: border-box;
-          border-radius: 7mm;
-          background: #e4e4e4;
-          padding: 8mm 5mm 6mm;
-          text-align: center;
-        }
-
-        .summary-item {
-          margin-bottom: 5mm;
-        }
-
-        .summary-label {
-          font-size: 8pt;
-          font-weight: 900;
-          margin-bottom: 1.5mm;
-        }
-
-        .summary-value {
-          font-size: 8pt;
-          font-weight: 800;
-          line-height: 1.3;
-          word-break: break-word;
-        }
-
-        .reservation-info {
-          width: 74mm;
-          margin-top: -16mm;
-          margin-left: 0;
-        }
-
-        .info-row {
-          display: grid;
-          grid-template-columns: 29mm 1fr;
-          align-items: baseline;
-          min-height: 8.4mm;
-          font-size: 9.2pt;
-        }
-
-        .info-label {
-          font-weight: 900;
-        }
-
-        .info-value {
-          font-weight: 900;
-          overflow-wrap: anywhere;
-        }
-
-        .agreement-text {
-          margin-top: 37mm;
-          font-size: 6.8pt;
-          line-height: 1.45;
-        }
-
-        .agreement-text p {
-          margin: 0 0 4mm;
-        }
-
-        .agreement-text strong {
-          font-weight: 900;
-        }
-
-        .signature-wrap {
-          width: 48mm;
-          margin-left: auto;
-          margin-top: 20mm;
-          text-align: center;
-          font-size: 8pt;
-          font-weight: 900;
-        }
-
-        .signature-title {
-          margin-bottom: 11mm;
-        }
-
-        .signature-line {
-          border-bottom: 0.5mm solid #000;
-          height: 0;
-        }
-
-        .reservation-footer {
-          position: absolute;
-          left: 10mm;
-          right: 10mm;
-          bottom: 5.5mm;
-          z-index: 1;
-          text-align: center;
-          font-size: 6.7pt;
-          line-height: 1.35;
-          color: #111;
+          .print-color {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
         }
       `}</style>
-    </main>
-  );
-}
 
-function SummaryItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="summary-item">
-      <div className="summary-label">{label}</div>
-      <div className="summary-value">{value}</div>
-    </div>
-  );
-}
+      <main className="min-h-screen bg-neutral-950 px-4 py-8 text-neutral-950">
+        <div className="no-print mx-auto mb-4 flex max-w-[794px] items-center justify-between text-white">
+          <button
+            type="button"
+            onClick={() => router.push(getPanelPathByRole(currentStudio.role))}
+            className="rounded-2xl border border-white/10 px-4 py-2 text-sm font-semibold text-neutral-300 transition hover:bg-white/10 hover:text-white"
+          >
+            Panele Dön
+          </button>
 
-function InfoRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="info-row">
-      <div className="info-label">{label}</div>
-      <div className="info-value">{value}</div>
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="rounded-2xl bg-yellow-400 px-5 py-2 text-sm font-black text-neutral-950 transition hover:bg-yellow-300"
+          >
+            Çıktı Al
+          </button>
+        </div>
+
+        <section className="print-page print-color relative mx-auto h-[1123px] w-[794px] overflow-hidden bg-white px-[40px] py-[48px] shadow-2xl">
+          {showWatermark && logoSrc ? (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={logoSrc}
+                alt=""
+                className="max-h-[300px] max-w-[360px] object-contain opacity-[0.12]"
+              />
+            </div>
+          ) : null}
+
+          <header className="relative z-10 grid grid-cols-[190px_1fr_200px] items-start gap-6">
+            <div className="flex justify-start">
+              {logoSrc ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={logoSrc}
+                  alt={studioName}
+                  className="h-[145px] w-[145px] object-contain"
+                />
+              ) : (
+                <div className="flex h-[120px] w-[120px] items-center justify-center rounded-3xl bg-neutral-200 text-3xl font-black">
+                  TP
+                </div>
+              )}
+            </div>
+
+            <div className="pt-2 text-center">
+              <h1 className="text-[30px] font-black tracking-wide">
+                RESERVATION
+              </h1>
+              <div className="mx-auto mt-3 h-px w-[220px] bg-black" />
+            </div>
+
+            <aside className="print-color rounded-[26px] bg-neutral-200 px-8 py-8 text-center">
+              <div className="text-[11px] font-black leading-5">
+                İşlem
+                <br />
+                Dövme
+              </div>
+
+              <div className="mt-7 text-[11px] font-black leading-5">
+                Tarih
+                <br />
+                {formatDate(printData.appointmentDate)}
+              </div>
+
+              <div className="mt-7 text-[11px] font-black leading-5">
+                Sanatçı
+                <br />
+                {artistName}
+              </div>
+
+              <div className="mt-7 text-[11px] font-black leading-5">
+                ID
+                <br />
+                {String(printData.ticketCode).slice(0, 12).toUpperCase()}
+              </div>
+            </aside>
+          </header>
+
+          <section className="absolute left-[40px] top-[265px] z-10 w-[440px]">
+  <div className="text-[13.5px] font-black leading-[26px]">
+    <div className="grid grid-cols-[105px_1fr]">
+      <span>İsim:</span>
+      <span>{printData.customerName}</span>
     </div>
+
+    <div className="grid grid-cols-[105px_1fr]">
+      <span>Soyisim:</span>
+      <span>{printData.customerSurname}</span>
+    </div>
+
+    <div className="grid grid-cols-[105px_1fr]">
+      <span>Tarih:</span>
+      <span>{formatShortDate(printData.appointmentDate)}</span>
+    </div>
+
+    <div className="grid grid-cols-[105px_1fr]">
+      <span>Saat:</span>
+      <span>{printData.appointmentTime}</span>
+    </div>
+
+    <div className="grid grid-cols-[105px_1fr]">
+      <span>İletişim:</span>
+      <span>{printData.phone}</span>
+    </div>
+
+    <div className="grid grid-cols-[105px_1fr]">
+      <span>Fiyat:</span>
+      <span>{formatCurrency(printData.totalPrice)}</span>
+    </div>
+
+    <div className="grid grid-cols-[105px_1fr]">
+      <span>Depozito:</span>
+      <span>{formatCurrency(printData.paidTotal)}</span>
+    </div>
+
+    <div className="grid grid-cols-[105px_1fr]">
+      <span>Rest:</span>
+      <span>{formatCurrency(printData.remainingTotal)}</span>
+    </div>
+
+    <div className="grid grid-cols-[105px_1fr]">
+      <span>Tasarımcı:</span>
+      <span>{designerName}</span>
+    </div>
+
+    <div className="grid grid-cols-[105px_1fr]">
+      <span>Kaynak:</span>
+      <span>{printData.source}</span>
+    </div>
+  </div>
+</section>
+
+          <section className="absolute left-[40px] right-[40px] top-[650px] z-10 text-[9.4px] font-semibold leading-[14.5px] text-black">
+            <p>
+              <strong>1. Eser;</strong> yaptıran; deri ve dermatit enfeksiyonları,
+              diyabet, ateş ve ağır somatik hastalıklar, akne veya deri
+              döküntüleri, hamilelik, alerjik reaksiyonlar, epilepsi, kalp
+              rahatsızlıkları gibi dövme veya piercing yaptırmasına engel teşkil
+              edebilecek bir rahatsızlığı olmadığını; hamile veya emzirme
+              döneminde olmadığını kabul ve beyan eder.
+            </p>
+
+            <p className="mt-5">
+              <strong>2. Eser;</strong> yaptıran; işbu iş ile taraflar arasında
+              eserin yapımı için belirlenen tarihteki randevusunu tamamen iptal
+              etmesi veya randevu saatinde habersiz olarak stüdyoya gelmemesi
+              halinde ödemiş olduğu depozito tutarını iade edemeyeceğini kabul ve
+              taahhüt eder.
+            </p>
+
+            <p className="mt-5">
+              <strong>3. Eser;</strong> yaptıran; eserin fotoğraf, video ve kayıt
+              görüntülerinin alınabileceğini; bu görüntülerin stüdyonun sosyal
+              medya hesaplarında, web sitesinde ve tanıtım çalışmalarında
+              kullanılabileceğini; kişisel verilerinin ilgili mevzuat kapsamında
+              işlenmesine açık rıza verdiğini kabul eder.
+            </p>
+          </section>
+
+          <section className="absolute right-[70px] top-[835px] z-10">
+  <div className="w-[180px] text-center">
+    <div className="text-[13px] font-black">İMZA</div>
+    <div className="mt-[105px] border-b border-black" />
+  </div>
+</section>
+
+          <footer className="absolute bottom-[24px] left-[40px] right-[40px] z-10 text-center text-[8.5px] text-black">
+            {footerText}
+          </footer>
+        </section>
+      </main>
+    </>
   );
 }

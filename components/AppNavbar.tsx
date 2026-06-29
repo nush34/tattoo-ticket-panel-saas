@@ -99,11 +99,12 @@ export default function AppNavbar() {
   const [loading, setLoading] = useState(true);
 
   const hideNavbar =
-    pathname === "/" ||
-    pathname === "/login" ||
-    pathname === "/abonelik" ||
-    pathname === "/uyelik-satin-al" ||
-    pathname.startsWith("/kayit");
+  pathname === "/" ||
+  pathname === "/login" ||
+  pathname === "/abonelik" ||
+  pathname === "/uyelik-satin-al" ||
+  pathname.startsWith("/kayit") ||
+  pathname.includes("/print");
 
   useEffect(() => {
     if (hideNavbar) {
@@ -376,13 +377,7 @@ export default function AppNavbar() {
                     Dövmeci Paneli
                   </Link>
 
-                  <Link
-                    href="/takvim"
-                    className={linkClass("/takvim")}
-                    style={linkStyle("/takvim")}
-                  >
-                    Takvim
-                  </Link>
+                  
                 </>
               )}
             </>
