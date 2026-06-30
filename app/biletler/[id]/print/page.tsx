@@ -463,29 +463,49 @@ setLoading(false);
         }
 
         @media print {
-          html,
-          body {
-            background: white !important;
-          }
+  html,
+  body {
+    width: 210mm !important;
+    height: 297mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    background: white !important;
+  }
 
-          .no-print {
-            display: none !important;
-          }
+  .no-print {
+    display: none !important;
+  }
 
-          .print-page {
-            margin: 0 !important;
-            box-shadow: none !important;
-            border: none !important;
-          }
+  .print-root {
+    width: 210mm !important;
+    height: 297mm !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    background: white !important;
+  }
 
-          .print-color {
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-          }
-        }
+  .print-page {
+    width: 210mm !important;
+    height: 297mm !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    overflow: hidden !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+  }
+
+  .print-color {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
       `}</style>
 
-      <main className="min-h-screen bg-neutral-950 px-4 py-8 text-neutral-950">
+      <main className="print-root min-h-screen bg-neutral-950 px-4 py-8 text-neutral-950">
         <div className="no-print mx-auto mb-4 flex max-w-[794px] items-center justify-between text-white">
           <button
             type="button"
@@ -620,7 +640,7 @@ setLoading(false);
   </div>
 </section>
 
-          <section className="absolute left-[40px] right-[40px] top-[650px] z-10 text-[9.4px] font-semibold leading-[14.5px] text-black">
+          <section className="absolute left-[40px] right-[40px] top-[750px] z-10 text-[9.4px] font-semibold leading-[14.5px] text-black">
             <p>
               <strong>1. Eser;</strong> yaptıran; deri ve dermatit enfeksiyonları,
               diyabet, ateş ve ağır somatik hastalıklar, akne veya deri
@@ -647,7 +667,7 @@ setLoading(false);
             </p>
           </section>
 
-          <section className="absolute right-[70px] top-[835px] z-10">
+          <section className="absolute right-[70px] top-[945px] z-10">
   <div className="w-[180px] text-center">
     <div className="text-[13px] font-black">İMZA</div>
     <div className="mt-[105px] border-b border-black" />

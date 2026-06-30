@@ -302,7 +302,7 @@ export default function AyarlarPage() {
         designer_can_see_total_revenue: isIndividual
           ? false
           : designerCanSeeTotalRevenue,
-        theme_color: themeColor,
+        theme_color: "#facc15",
       };
 
       let saveError: any = null;
@@ -420,7 +420,7 @@ export default function AyarlarPage() {
                 />
               </div>
 
-              <div>
+              <div className="hidden">
                 <label className="mb-2 block text-sm font-semibold text-neutral-200">
                   Panel Tema Rengi
                 </label>

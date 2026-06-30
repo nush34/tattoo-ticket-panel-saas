@@ -488,7 +488,7 @@ export default function SoloPanelPage() {
             <p className="text-zinc-400 mt-2 text-sm md:text-base">Rezervasyonlarını, cirolarını ve takvimini tek ekrandan takip et.</p>
           </div>
 
-          <Link href="/ayarlar" className="rounded-2xl elegant-button-gold px-5 py-3 text-sm font-bold">Kimlik / Baskı Ayarları</Link>
+          
         </div>
 
         {errorMessage && (
