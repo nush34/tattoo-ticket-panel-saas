@@ -302,6 +302,33 @@ export default function AdminPanelPage() {
     });
   }
 
+  async function handleDeleteTicket(ticketId: string) {
+  const confirmed = window.confirm(
+    "Bu bileti tamamen silmek istediğine emin misin?\n\n" +
+      "Bilete bağlı ödeme, refresh ve fiyat değişikliği kayıtları da silinecek."
+  );
+
+  if (!confirmed) return;
+
+  setErrorMessage("");
+  setSuccessMessage("");
+
+  const supabase = createClient();
+
+  const { error } = await supabase.rpc("admin_delete_ticket", {
+    target_ticket_id: ticketId,
+  });
+
+  if (error) {
+    setErrorMessage(error.message);
+    return;
+  }
+
+  setSuccessMessage("Bilet silindi.");
+
+  await loadData();
+}
+  
   async function getAccessToken() {
     const supabase = createClient();
 

@@ -2,7 +2,6 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import AppNavbar from "../../components/AppNavbar";
 import { createClient } from "../../lib/supabase/client";
 import {
   CurrentStudio,
@@ -121,6 +120,7 @@ export default function AdminPanelPage() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deletingTicketId, setDeletingTicketId] = useState<string | null>(null);
 
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
@@ -519,6 +519,48 @@ export default function AdminPanelPage() {
     setSaving(false);
 
     await loadData();
+  }
+
+  async function handleDeleteTicket(ticketId: string) {
+    if (!studio || !profile) return;
+
+    if (profile.role !== "owner" && profile.role !== "admin") {
+      setErrorMessage("Bu bileti silme yetkiniz yok.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Bu bileti tamamen silmek istediğine emin misin?\n\n" +
+        "Bilete bağlı ödeme, refresh ve fiyat değişikliği kayıtları da silinecek. " +
+        "Bu işlem geri alınamaz."
+    );
+
+    if (!confirmed) return;
+
+    setDeletingTicketId(ticketId);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      const supabase = createClient();
+
+      const { error } = await supabase.rpc("admin_delete_ticket", {
+        target_ticket_id: ticketId,
+      });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      await loadData();
+      setSuccessMessage("Bilet ve bağlı kayıtları başarıyla silindi.");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Bilet silinemedi.";
+      setErrorMessage(message);
+    } finally {
+      setDeletingTicketId(null);
+    }
   }
 
   const filtrelenmisTickets = useMemo(() => {
@@ -1301,81 +1343,98 @@ export default function AdminPanelPage() {
                   const kalan = toplam - alinan;
 
                   return (
-                    <a
+                    <div
                       key={ticket.id}
-                      href={`/biletler/${ticket.id}`}
                       className={
                         biletRefreshMi(ticket)
-                          ? "block rounded-3xl bg-zinc-950 border border-yellow-500/30 p-4 hover:border-yellow-400 transition"
-                          : "block rounded-3xl elegant-card-soft p-4 transition hover:border-yellow-500/30"
+                          ? "rounded-3xl bg-zinc-950 border border-yellow-500/30 p-4 transition hover:border-yellow-400"
+                          : "rounded-3xl elegant-card-soft p-4 transition hover:border-yellow-500/30"
                       }
                     >
-                      <div className="flex flex-wrap items-center gap-2 md:gap-3">
-                        <p className="font-bold">{ticket.bilet_no}</p>
+                      <a href={`/biletler/${ticket.id}`} className="block">
+                        <div className="flex flex-wrap items-center gap-2 md:gap-3">
+                          <p className="font-bold">{ticket.bilet_no}</p>
 
-                        <span className="rounded-full bg-zinc-800 px-3 py-1 text-xs text-zinc-300">
-                          {durumEtiketi(ticket.durum)}
-                        </span>
-
-                        <span className="rounded-full bg-zinc-800 px-3 py-1 text-xs text-zinc-300">
-                          {formatDate(ticket.randevu_tarihi)}
-                        </span>
-
-                        {biletRefreshMi(ticket) && (
-                          <span className="rounded-full bg-yellow-500/10 border border-yellow-500/30 px-3 py-1 text-xs font-semibold text-yellow-200">
-                            REFRESH
+                          <span className="rounded-full bg-zinc-800 px-3 py-1 text-xs text-zinc-300">
+                            {durumEtiketi(ticket.durum)}
                           </span>
-                        )}
 
-                        {ticket.garanti_kapsaminda && (
-                          <span className="rounded-full bg-emerald-500/10 border border-emerald-500/30 px-3 py-1 text-xs font-semibold text-emerald-200">
-                            GARANTİ
+                          <span className="rounded-full bg-zinc-800 px-3 py-1 text-xs text-zinc-300">
+                            {formatDate(ticket.randevu_tarihi)}
                           </span>
-                        )}
 
-                        {nakit > 0 && (
-                          <span className={odemeYontemiBadgeClass("nakit")}>
-                            Nakit: {formatPrice(nakit)}
-                          </span>
-                        )}
+                          {biletRefreshMi(ticket) && (
+                            <span className="rounded-full bg-yellow-500/10 border border-yellow-500/30 px-3 py-1 text-xs font-semibold text-yellow-200">
+                              REFRESH
+                            </span>
+                          )}
 
-                        {kart > 0 && (
-                          <span className={odemeYontemiBadgeClass("kart")}>
-                            Kart: {formatPrice(kart)}
-                          </span>
-                        )}
-                      </div>
+                          {ticket.garanti_kapsaminda && (
+                            <span className="rounded-full bg-emerald-500/10 border border-emerald-500/30 px-3 py-1 text-xs font-semibold text-emerald-200">
+                              GARANTİ
+                            </span>
+                          )}
 
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3 mt-4">
-                        <div className="rounded-2xl elegant-card p-3">
-                          <p className="text-zinc-500 text-xs">Toplam</p>
-                          <p className="font-bold mt-1 text-sm md:text-base">
-                            {formatPrice(toplam)}
-                          </p>
+                          {nakit > 0 && (
+                            <span className={odemeYontemiBadgeClass("nakit")}>
+                              Nakit: {formatPrice(nakit)}
+                            </span>
+                          )}
+
+                          {kart > 0 && (
+                            <span className={odemeYontemiBadgeClass("kart")}>
+                              Kart: {formatPrice(kart)}
+                            </span>
+                          )}
                         </div>
 
-                        <div className="rounded-2xl elegant-card p-3">
-                          <p className="text-zinc-500 text-xs">Alınan</p>
-                          <p className="font-bold mt-1 text-sm md:text-base">
-                            {formatPrice(alinan)}
-                          </p>
-                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3 mt-4">
+                          <div className="rounded-2xl elegant-card p-3">
+                            <p className="text-zinc-500 text-xs">Toplam</p>
+                            <p className="font-bold mt-1 text-sm md:text-base">
+                              {formatPrice(toplam)}
+                            </p>
+                          </div>
 
-                        <div className="rounded-2xl elegant-card p-3">
-                          <p className="text-zinc-500 text-xs">Nakit / Kart</p>
-                          <p className="font-bold mt-1 text-sm md:text-base">
-                            {formatPrice(nakit)} / {formatPrice(kart)}
-                          </p>
-                        </div>
+                          <div className="rounded-2xl elegant-card p-3">
+                            <p className="text-zinc-500 text-xs">Alınan</p>
+                            <p className="font-bold mt-1 text-sm md:text-base">
+                              {formatPrice(alinan)}
+                            </p>
+                          </div>
 
-                        <div className="rounded-2xl elegant-card p-3">
-                          <p className="text-zinc-500 text-xs">Kalan</p>
-                          <p className="font-bold mt-1 text-sm md:text-base">
-                            {formatPrice(kalan)}
-                          </p>
+                          <div className="rounded-2xl elegant-card p-3">
+                            <p className="text-zinc-500 text-xs">Nakit / Kart</p>
+                            <p className="font-bold mt-1 text-sm md:text-base">
+                              {formatPrice(nakit)} / {formatPrice(kart)}
+                            </p>
+                          </div>
+
+                          <div className="rounded-2xl elegant-card p-3">
+                            <p className="text-zinc-500 text-xs">Kalan</p>
+                            <p className="font-bold mt-1 text-sm md:text-base">
+                              {formatPrice(kalan)}
+                            </p>
+                          </div>
                         </div>
-                      </div>
-                    </a>
+                      </a>
+
+                      {(profile?.role === "owner" ||
+                        profile?.role === "admin") && (
+                        <div className="mt-4 flex justify-end border-t border-white/10 pt-4">
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteTicket(ticket.id)}
+                            disabled={deletingTicketId === ticket.id}
+                            className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-semibold text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {deletingTicketId === ticket.id
+                              ? "Siliniyor..."
+                              : "Bileti Sil"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
               </div>

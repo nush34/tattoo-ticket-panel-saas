@@ -251,6 +251,7 @@ export default function TicketDetailPage() {
   const [saving, setSaving] = useState(false);
   const [refreshSaving, setRefreshSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deletingRefreshId, setDeletingRefreshId] = useState<string | null>(null);
 
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
@@ -283,6 +284,9 @@ export default function TicketDetailPage() {
   const kalanTutar = toplamUcret - toplamAlinan;
 
   const canChangeDesigner =
+    profile?.role === "owner" || profile?.role === "admin";
+
+  const canDeleteRecords =
     profile?.role === "owner" || profile?.role === "admin";
 
   async function getDisplayImageUrl(storedValue: string | null) {
@@ -631,16 +635,60 @@ export default function TicketDetailPage() {
     }
   }
 
-  async function handleDeleteTicket() {
-    if (!ticket || !studio) return;
-
-    if (profile?.role !== "admin") {
-      setErrorMessage("Bu işlemi sadece admin yapabilir.");
+  async function handleDeleteRefresh(refreshId: string) {
+    if (!ticket || !studio || !canDeleteRecords) {
+      setErrorMessage("Bu refresh kaydını silme yetkiniz yok.");
       return;
     }
 
     const confirmed = window.confirm(
-      "Bu bileti silmek istediğine emin misin? Bu işlem geri alınamaz."
+      "Bu refresh kaydını silmek istediğine emin misin?\n\n" +
+        "Bu işlem yalnızca seçilen yanlış refresh geçmişini kaldırır."
+    );
+
+    if (!confirmed) return;
+
+    setDeletingRefreshId(refreshId);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      const supabase = createClient();
+
+      const { error } = await supabase.rpc(
+        "admin_delete_ticket_refresh",
+        {
+          target_refresh_id: refreshId,
+        }
+      );
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      await loadData();
+      setSuccessMessage("Refresh kaydı başarıyla silindi.");
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Refresh kaydı silinemedi.";
+      setErrorMessage(message);
+    } finally {
+      setDeletingRefreshId(null);
+    }
+  }
+
+  async function handleDeleteTicket() {
+    if (!ticket || !studio || !canDeleteRecords) {
+      setErrorMessage("Bu bileti silme yetkiniz yok.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Bu bileti tamamen silmek istediğine emin misin?\n\n" +
+        "Bilete bağlı ödeme, refresh ve fiyat değişikliği kayıtları da silinecek. " +
+        "Bu işlem geri alınamaz."
     );
 
     if (!confirmed) return;
@@ -651,8 +699,8 @@ export default function TicketDetailPage() {
 
     try {
       const supabase = createClient();
-      const { error } = await supabase.rpc("delete_bilet_detail", {
-        target_studio_id: studio.studio_id,
+
+      const { error } = await supabase.rpc("admin_delete_ticket", {
         target_ticket_id: ticket.id,
       });
 
@@ -661,8 +709,10 @@ export default function TicketDetailPage() {
       }
 
       router.push("/biletler");
+      router.refresh();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Bilet silinemedi.";
+      const message =
+        error instanceof Error ? error.message : "Bilet silinemedi.";
       setErrorMessage(message);
       setDeleting(false);
     }
@@ -1131,12 +1181,31 @@ export default function TicketDetailPage() {
                   <div key={refresh.id} className="rounded-3xl elegant-card-soft p-4 md:p-5">
                     <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                       <div>
-                        <p className="font-black text-cyan-100">{formatDate(refresh.refresh_tarihi)}</p>
-                        <p className="text-zinc-500 text-sm mt-2">{refresh.refresh_notu || "Not yok"}</p>
+                        <p className="font-black text-cyan-100">
+                          {formatDate(refresh.refresh_tarihi)}
+                        </p>
+                        <p className="text-zinc-500 text-sm mt-2">
+                          {refresh.refresh_notu || "Not yok"}
+                        </p>
                       </div>
 
-                      <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-zinc-300">
-                        Kayıt: {formatDateTime(refresh.created_at)}
+                      <div className="flex flex-col gap-2 md:items-end">
+                        <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-zinc-300">
+                          Kayıt: {formatDateTime(refresh.created_at)}
+                        </div>
+
+                        {canDeleteRecords && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteRefresh(refresh.id)}
+                            disabled={deletingRefreshId === refresh.id}
+                            className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {deletingRefreshId === refresh.id
+                              ? "Siliniyor..."
+                              : "Refresh Kaydını Sil"}
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1165,12 +1234,14 @@ export default function TicketDetailPage() {
           </div>
         </form>
 
-        {profile?.role === "admin" && (
+        {canDeleteRecords && (
           <section className="rounded-[2rem] border border-red-500/20 bg-red-500/5 p-4 md:p-6 mt-8">
             <h2 className="text-xl font-black text-red-100">Tehlikeli Alan</h2>
 
             <p className="text-red-100/60 text-sm mt-2">
-              Bu bileti silersen bilet ve bağlı kayıtlar kaldırılır. Bu işlem geri alınamaz. Bu alan sadece admin kullanıcılarında görünür.
+              Bu bileti silersen bilet ve bağlı ödeme, refresh ve fiyat geçmişi
+              kayıtları kaldırılır. Bu işlem geri alınamaz. Bu alan yalnızca
+              owner ve admin kullanıcılarında görünür.
             </p>
 
             <button
