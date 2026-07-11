@@ -97,6 +97,42 @@ type AddonSummary = {
   oneTimeSales: number;
 };
 
+type AddonRequestStatus =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "cancelled";
+
+type AddonRequestKind = "purchase" | "renewal";
+
+type AddonPurchaseRequest = {
+  request_id: string;
+  studio_id: string;
+  studio_name: string;
+  account_type: AccountType;
+  addon_id: string;
+  addon_code: string;
+  addon_name: string;
+  request_kind: AddonRequestKind;
+  billing_type: AddonBillingType;
+  requested_price: number | null;
+  request_status: AddonRequestStatus;
+  requester_name: string | null;
+  requester_email: string | null;
+  requester_note: string | null;
+  admin_note: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+};
+
+type AddonRequestEditState = {
+  agreed_price: string;
+  license_status: "trial" | "active";
+  starts_at: string;
+  ends_at: string;
+  admin_note: string;
+};
+
 type SuperAdminStudio = {
   studio_id: string;
   studio_name: string;
@@ -293,6 +329,67 @@ function getRenewalDaysLabel(value?: string | null) {
   return `${left} gün kaldı`;
 }
 
+function getTodayInputDate() {
+  const now = new Date();
+  const offset = now.getTimezoneOffset() * 60000;
+
+  return new Date(now.getTime() - offset).toISOString().slice(0, 10);
+}
+
+function getDefaultAddonRequestEndDate(
+  startValue: string,
+  billingType: AddonBillingType
+) {
+  if (!startValue || billingType === "one_time") return "";
+
+  const start = new Date(`${startValue}T12:00:00`);
+
+  if (billingType === "yearly") {
+    start.setFullYear(start.getFullYear() + 1);
+  } else {
+    start.setMonth(start.getMonth() + 1);
+  }
+
+  const offset = start.getTimezoneOffset() * 60000;
+
+  return new Date(start.getTime() - offset).toISOString().slice(0, 10);
+}
+
+function addonRequestStatusLabel(status: AddonRequestStatus) {
+  if (status === "approved") return "Onaylandı";
+  if (status === "rejected") return "Reddedildi";
+  if (status === "cancelled") return "İptal Edildi";
+  return "Onay Bekliyor";
+}
+
+function addonRequestStatusClass(status: AddonRequestStatus) {
+  if (status === "approved") {
+    return "border-emerald-500/30 bg-emerald-500/10 text-emerald-200";
+  }
+
+  if (status === "rejected") {
+    return "border-red-500/30 bg-red-500/10 text-red-200";
+  }
+
+  if (status === "cancelled") {
+    return "border-zinc-500/30 bg-zinc-500/10 text-zinc-300";
+  }
+
+  return "border-yellow-400/30 bg-yellow-400/10 text-yellow-200";
+}
+
+function addonRequestKindLabel(kind: AddonRequestKind) {
+  return kind === "renewal" ? "Yenileme" : "Yeni Satın Alma";
+}
+
+function toStartTimestamp(value: string) {
+  return value ? `${value}T00:00:00.000Z` : null;
+}
+
+function toEndTimestamp(value: string) {
+  return value ? `${value}T23:59:59.999Z` : null;
+}
+
 function billingTypeLabel(type: AddonBillingType) {
   if (type === "yearly") return "Yıllık";
   if (type === "one_time") return "Tek Seferlik";
@@ -396,6 +493,14 @@ export default function SuperAdminPage() {
   const [newAddon, setNewAddon] = useState<NewAddonState>(emptyNewAddon());
   const [addonSavingKey, setAddonSavingKey] = useState<string | null>(null);
 
+  const [addonRequests, setAddonRequests] = useState<AddonPurchaseRequest[]>([]);
+  const [addonRequestEdits, setAddonRequestEdits] = useState<
+    Record<string, AddonRequestEditState>
+  >({});
+  const [addonRequestSavingId, setAddonRequestSavingId] = useState<
+    string | null
+  >(null);
+
   useEffect(() => {
     loadData();
   }, []);
@@ -495,9 +600,87 @@ export default function SuperAdminPage() {
           : "Eklenti yönetim bilgileri yüklenemedi.";
       setErrorMessage(message);
     }
+
+    try {
+      await loadAddonRequests();
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Eklenti satın alma talepleri yüklenemedi.";
+
+      setErrorMessage((current) =>
+        current ? `${current} | ${message}` : message
+      );
+    }
+
     setLoading(false);
   }
 
+  async function fetchAddonRequests() {
+    const supabase = createClient();
+
+    const { data, error } = await supabase.rpc(
+      "get_super_admin_addon_requests"
+    );
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return (data || []) as AddonPurchaseRequest[];
+  }
+
+  function applyAddonRequestData(rows: AddonPurchaseRequest[]) {
+    const cleanRequests = rows.map((request) => ({
+      ...request,
+      account_type: request.account_type || "studio",
+      requested_price:
+        request.requested_price === null
+          ? null
+          : Number(request.requested_price || 0),
+    }));
+
+    setAddonRequests(cleanRequests);
+
+    const today = getTodayInputDate();
+    const nextEdits: Record<string, AddonRequestEditState> = {};
+
+    cleanRequests.forEach((request) => {
+      nextEdits[request.request_id] = {
+        agreed_price:
+          request.requested_price === null
+            ? ""
+            : String(request.requested_price),
+        license_status: "active",
+        starts_at: today,
+        ends_at: getDefaultAddonRequestEndDate(
+          today,
+          request.billing_type
+        ),
+        admin_note: request.admin_note || "",
+      };
+    });
+
+    setAddonRequestEdits(nextEdits);
+  }
+
+  async function loadAddonRequests() {
+    const rows = await fetchAddonRequests();
+    applyAddonRequestData(rows);
+  }
+
+  async function refreshAddonRequestsAndLicenses() {
+    const token = await getAccessToken();
+
+    const [addonData, requestRows] = await Promise.all([
+      fetchAddonManagementData(token),
+      fetchAddonRequests(),
+    ]);
+
+    applyAddonManagementData(addonData, studios);
+    applyAddonRequestData(requestRows);
+  }
 
   async function fetchAddonManagementData(token: string) {
     const response = await fetch("/api/super-admin/addons", {
@@ -841,6 +1024,139 @@ export default function SuperAdminPage() {
     }
   }
 
+  function updateAddonRequestEdit<K extends keyof AddonRequestEditState>(
+    requestId: string,
+    field: K,
+    value: AddonRequestEditState[K]
+  ) {
+    setAddonRequestEdits((current) => ({
+      ...current,
+      [requestId]: {
+        ...current[requestId],
+        [field]: value,
+      },
+    }));
+  }
+
+  async function handleApproveAddonRequest(
+    request: AddonPurchaseRequest
+  ) {
+    const edit = addonRequestEdits[request.request_id];
+
+    if (!edit) return;
+
+    if (
+      edit.starts_at &&
+      edit.ends_at &&
+      new Date(edit.ends_at).getTime() <=
+        new Date(edit.starts_at).getTime()
+    ) {
+      setErrorMessage(
+        "Eklenti lisansının bitiş tarihi başlangıç tarihinden sonra olmalıdır."
+      );
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `${request.studio_name} hesabının ${request.addon_name} talebini onaylamak istediğine emin misin?`
+    );
+
+    if (!confirmed) return;
+
+    setAddonRequestSavingId(request.request_id);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      const supabase = createClient();
+
+      const { error } = await supabase.rpc(
+        "super_admin_decide_addon_request",
+        {
+          p_request_id: request.request_id,
+          p_decision: "approved",
+          p_admin_note: edit.admin_note.trim() || null,
+          p_agreed_price:
+            edit.agreed_price === ""
+              ? null
+              : Number(edit.agreed_price),
+          p_license_status: edit.license_status,
+          p_starts_at: toStartTimestamp(edit.starts_at),
+          p_ends_at: toEndTimestamp(edit.ends_at),
+        }
+      );
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      await refreshAddonRequestsAndLicenses();
+
+      setSuccessMessage(
+        `${request.addon_name}, ${request.studio_name} hesabında aktif edildi.`
+      );
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Eklenti talebi onaylanamadı."
+      );
+    } finally {
+      setAddonRequestSavingId(null);
+    }
+  }
+
+  async function handleRejectAddonRequest(
+    request: AddonPurchaseRequest
+  ) {
+    const edit = addonRequestEdits[request.request_id];
+
+    const confirmed = window.confirm(
+      `${request.studio_name} hesabının ${request.addon_name} talebini reddetmek istediğine emin misin?`
+    );
+
+    if (!confirmed) return;
+
+    setAddonRequestSavingId(request.request_id);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      const supabase = createClient();
+
+      const { error } = await supabase.rpc(
+        "super_admin_decide_addon_request",
+        {
+          p_request_id: request.request_id,
+          p_decision: "rejected",
+          p_admin_note: edit?.admin_note.trim() || null,
+          p_agreed_price: null,
+          p_license_status: "active",
+          p_starts_at: null,
+          p_ends_at: null,
+        }
+      );
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      await refreshAddonRequestsAndLicenses();
+
+      setSuccessMessage(
+        `${request.addon_name} talebi reddedildi.`
+      );
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Eklenti talebi reddedilemedi."
+      );
+    } finally {
+      setAddonRequestSavingId(null);
+    }
+  }
+
   async function handleLogout() {
     const supabase = createClient();
 
@@ -1154,6 +1470,14 @@ export default function SuperAdminPage() {
 
         <ReportSection studios={studios} summary={summary} />
 
+        <AddonPurchaseRequestsSection
+          requests={addonRequests}
+          edits={addonRequestEdits}
+          savingRequestId={addonRequestSavingId}
+          onUpdateEdit={updateAddonRequestEdit}
+          onApprove={handleApproveAddonRequest}
+          onReject={handleRejectAddonRequest}
+        />
 
         <AddonCatalogSection
           addons={addons}
@@ -1614,6 +1938,368 @@ export default function SuperAdminPage() {
   );
 }
 
+
+function AddonPurchaseRequestsSection({
+  requests,
+  edits,
+  savingRequestId,
+  onUpdateEdit,
+  onApprove,
+  onReject,
+}: {
+  requests: AddonPurchaseRequest[];
+  edits: Record<string, AddonRequestEditState>;
+  savingRequestId: string | null;
+  onUpdateEdit: <K extends keyof AddonRequestEditState>(
+    requestId: string,
+    field: K,
+    value: AddonRequestEditState[K]
+  ) => void;
+  onApprove: (request: AddonPurchaseRequest) => Promise<void>;
+  onReject: (request: AddonPurchaseRequest) => Promise<void>;
+}) {
+  const pendingRequests = requests.filter(
+    (request) => request.request_status === "pending"
+  );
+
+  const completedRequests = requests.filter(
+    (request) => request.request_status !== "pending"
+  );
+
+  const approvedCount = requests.filter(
+    (request) => request.request_status === "approved"
+  ).length;
+
+  const rejectedCount = requests.filter(
+    (request) => request.request_status === "rejected"
+  ).length;
+
+  const pendingTotal = pendingRequests.reduce((total, request) => {
+    return total + Number(request.requested_price || 0);
+  }, 0);
+
+  return (
+    <section className="rounded-[2rem] elegant-card p-4 md:p-6 mb-8">
+      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-6">
+        <div>
+          <p className="inline-flex rounded-full border border-yellow-400/30 bg-yellow-400/10 px-3 py-1 text-xs font-semibold text-yellow-200">
+            Satış Talepleri
+          </p>
+
+          <h2 className="text-xl md:text-2xl font-black mt-3">
+            Eklenti Satın Alma Talepleri
+          </h2>
+
+          <p className="text-zinc-500 text-sm mt-2 max-w-3xl">
+            Stüdyo ve bireysel hesaplardan gelen yeni satın alma ve yenileme
+            taleplerini buradan onaylayabilir veya reddedebilirsin. Onaylanan
+            talebin lisansı otomatik oluşturulur.
+          </p>
+        </div>
+
+        <span className="rounded-full border border-yellow-400/30 bg-yellow-400/10 px-4 py-2 text-sm font-black text-yellow-200">
+          {pendingRequests.length} bekleyen talep
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <InfoCard
+          title="Bekleyen"
+          value={String(pendingRequests.length)}
+          subValue="İşlem bekleyen talepler"
+        />
+
+        <InfoCard
+          title="Onaylanan"
+          value={String(approvedCount)}
+          subValue="Lisansı açılan talepler"
+        />
+
+        <InfoCard
+          title="Reddedilen"
+          value={String(rejectedCount)}
+          subValue="Reddedilmiş talepler"
+        />
+
+        <InfoCard
+          title="Bekleyen Tutar"
+          value={formatPrice(pendingTotal)}
+          subValue="Katalog fiyatlarına göre"
+        />
+      </div>
+
+      {pendingRequests.length === 0 ? (
+        <div className="rounded-3xl elegant-card-soft p-5 text-zinc-400">
+          Şu anda onay bekleyen eklenti talebi yok.
+        </div>
+      ) : (
+        <div className="space-y-5">
+          {pendingRequests.map((request) => {
+            const edit = edits[request.request_id];
+            const isSaving = savingRequestId === request.request_id;
+
+            if (!edit) return null;
+
+            return (
+              <article
+                key={request.request_id}
+                className="rounded-3xl border border-yellow-400/20 bg-yellow-400/[0.04] p-4 md:p-5"
+              >
+                <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-lg md:text-xl font-black text-white">
+                        {request.addon_name}
+                      </h3>
+
+                      <span className="rounded-full border border-yellow-400/30 bg-yellow-400/10 px-3 py-1 text-xs font-bold text-yellow-200">
+                        {addonRequestKindLabel(request.request_kind)}
+                      </span>
+
+                      <span className={accountTypeBadgeClass(request.account_type)}>
+                        {accountTypeLabel(request.account_type)}
+                      </span>
+                    </div>
+
+                    <p className="text-zinc-300 font-bold mt-3">
+                      {request.studio_name}
+                    </p>
+
+                    <p className="text-xs text-zinc-500 mt-1">
+                      {request.addon_code} · {billingTypeLabel(request.billing_type)}
+                    </p>
+                  </div>
+
+                  <span className="rounded-full border border-yellow-400/30 bg-yellow-400/10 px-3 py-1 text-xs font-semibold text-yellow-200">
+                    {addonRequestStatusLabel(request.request_status)}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-5">
+                  <InfoCard
+                    title="Talep Eden"
+                    value={request.requester_name || "-"}
+                    subValue={request.requester_email || "-"}
+                  />
+
+                  <InfoCard
+                    title="Talep Fiyatı"
+                    value={formatPrice(request.requested_price)}
+                    subValue={billingTypeLabel(request.billing_type)}
+                  />
+
+                  <InfoCard
+                    title="Talep Tarihi"
+                    value={formatDateTime(request.created_at)}
+                    subValue={addonRequestKindLabel(request.request_kind)}
+                  />
+
+                  <InfoCard
+                    title="Hesap Türü"
+                    value={accountTypeLabel(request.account_type)}
+                    subValue={request.studio_name}
+                  />
+                </div>
+
+                {request.requester_note ? (
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4 mt-4">
+                    <p className="text-xs font-bold text-zinc-500">
+                      Kullanıcı Notu
+                    </p>
+                    <p className="text-sm leading-6 text-zinc-300 mt-2">
+                      {request.requester_note}
+                    </p>
+                  </div>
+                ) : null}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4 mt-5">
+                  <div>
+                    <label className="block text-sm text-zinc-400 mb-2">
+                      Lisans Durumu
+                    </label>
+                    <select
+                      value={edit.license_status}
+                      onChange={(event) =>
+                        onUpdateEdit(
+                          request.request_id,
+                          "license_status",
+                          event.target.value as "trial" | "active"
+                        )
+                      }
+                      className="w-full rounded-2xl elegant-input px-4 py-3 text-white"
+                    >
+                      <option value="active">Aktif</option>
+                      <option value="trial">Deneme</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm text-zinc-400 mb-2">
+                      Anlaşılan Fiyat
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={edit.agreed_price}
+                      onChange={(event) =>
+                        onUpdateEdit(
+                          request.request_id,
+                          "agreed_price",
+                          event.target.value
+                        )
+                      }
+                      className="w-full rounded-2xl elegant-input px-4 py-3 text-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm text-zinc-400 mb-2">
+                      Başlangıç
+                    </label>
+                    <input
+                      type="date"
+                      value={edit.starts_at}
+                      onChange={(event) =>
+                        onUpdateEdit(
+                          request.request_id,
+                          "starts_at",
+                          event.target.value
+                        )
+                      }
+                      className="w-full rounded-2xl elegant-input px-4 py-3 text-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm text-zinc-400 mb-2">
+                      Bitiş
+                    </label>
+                    <input
+                      type="date"
+                      value={edit.ends_at}
+                      onChange={(event) =>
+                        onUpdateEdit(
+                          request.request_id,
+                          "ends_at",
+                          event.target.value
+                        )
+                      }
+                      className="w-full rounded-2xl elegant-input px-4 py-3 text-white"
+                    />
+                  </div>
+
+                  <div className="md:col-span-2 xl:col-span-1">
+                    <label className="block text-sm text-zinc-400 mb-2">
+                      Dönem
+                    </label>
+                    <div className="rounded-2xl elegant-input px-4 py-3 text-sm font-bold text-white">
+                      {billingTypeLabel(request.billing_type)}
+                    </div>
+                  </div>
+
+                  <div className="md:col-span-2 xl:col-span-5">
+                    <label className="block text-sm text-zinc-400 mb-2">
+                      Super Admin Notu
+                    </label>
+                    <textarea
+                      value={edit.admin_note}
+                      onChange={(event) =>
+                        onUpdateEdit(
+                          request.request_id,
+                          "admin_note",
+                          event.target.value
+                        )
+                      }
+                      rows={3}
+                      className="w-full rounded-2xl elegant-input px-4 py-3 text-white"
+                      placeholder="Ödeme, lisans veya red nedeni..."
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+                  <button
+                    type="button"
+                    onClick={() => onApprove(request)}
+                    disabled={isSaving}
+                    className="rounded-2xl elegant-button-gold px-4 py-4 font-black disabled:opacity-50"
+                  >
+                    {isSaving ? "İşleniyor..." : "Talebi Onayla ve Lisansı Aç"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => onReject(request)}
+                    disabled={isSaving}
+                    className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-4 font-black text-red-200 hover:bg-red-500/20 disabled:opacity-50"
+                  >
+                    {isSaving ? "İşleniyor..." : "Talebi Reddet"}
+                  </button>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      <details className="rounded-3xl elegant-card-soft p-4 md:p-5 mt-6">
+        <summary className="cursor-pointer list-none font-black text-white">
+          Geçmiş Talepler ({completedRequests.length})
+        </summary>
+
+        <div className="space-y-3 mt-5">
+          {completedRequests.length === 0 ? (
+            <div className="rounded-2xl elegant-card p-4 text-sm text-zinc-400">
+              Sonuçlandırılmış talep bulunmuyor.
+            </div>
+          ) : (
+            completedRequests.slice(0, 30).map((request) => (
+              <div
+                key={request.request_id}
+                className="rounded-2xl elegant-card p-4"
+              >
+                <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-black text-white">
+                        {request.addon_name}
+                      </p>
+                      <span
+                        className={`rounded-full border px-3 py-1 text-xs font-bold ${addonRequestStatusClass(
+                          request.request_status
+                        )}`}
+                      >
+                        {addonRequestStatusLabel(request.request_status)}
+                      </span>
+                    </div>
+
+                    <p className="text-sm text-zinc-400 mt-2">
+                      {request.studio_name} · {addonRequestKindLabel(request.request_kind)} · {billingTypeLabel(request.billing_type)}
+                    </p>
+
+                    <p className="text-xs text-zinc-500 mt-1">
+                      Talep: {formatDateTime(request.created_at)} · Sonuç: {formatDateTime(request.reviewed_at)}
+                    </p>
+                  </div>
+
+                  <p className="font-black text-yellow-200">
+                    {formatPrice(request.requested_price)}
+                  </p>
+                </div>
+
+                {request.admin_note ? (
+                  <p className="text-sm text-zinc-400 mt-3">
+                    Not: {request.admin_note}
+                  </p>
+                ) : null}
+              </div>
+            ))
+          )}
+        </div>
+      </details>
+    </section>
+  );
+}
 
 function AddonCatalogSection({
   addons,

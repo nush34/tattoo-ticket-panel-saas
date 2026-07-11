@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "../lib/supabase/client";
 import { getCurrentStudio, type CurrentStudio } from "../lib/saas/studio";
@@ -9,6 +9,12 @@ import { getCurrentStudio, type CurrentStudio } from "../lib/saas/studio";
 type StudioSettings = {
   studio_name: string | null;
   logo_url: string | null;
+};
+
+type ExtraLink = {
+  href: string;
+  label: string;
+  description: string;
 };
 
 function addCacheBuster(url: string) {
@@ -56,6 +62,8 @@ export default function AppNavbar() {
   const pathname = usePathname();
   const router = useRouter();
 
+  const extrasMenuRef = useRef<HTMLDivElement | null>(null);
+
   const [currentStudio, setCurrentStudio] =
     useState<CurrentStudio | null>(null);
 
@@ -63,7 +71,14 @@ export default function AppNavbar() {
     useState<StudioSettings | null>(null);
 
   const [logoSrc, setLogoSrc] = useState<string | null>(null);
-  const [hasAdvancedReports, setHasAdvancedReports] = useState(false);
+
+  const [hasAdvancedReports, setHasAdvancedReports] =
+    useState(false);
+
+  const [hasWhatsAppReminders, setHasWhatsAppReminders] =
+    useState(false);
+
+  const [extrasOpen, setExtrasOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const hideNavbar =
@@ -101,6 +116,29 @@ export default function AppNavbar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname, hideNavbar]);
 
+  useEffect(() => {
+    setExtrasOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    function handleOutsideClick(event: MouseEvent) {
+      const target = event.target as Node;
+
+      if (
+        extrasMenuRef.current &&
+        !extrasMenuRef.current.contains(target)
+      ) {
+        setExtrasOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleOutsideClick);
+
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+    };
+  }, []);
+
   async function loadNavbar() {
     setLoading(true);
 
@@ -111,6 +149,7 @@ export default function AppNavbar() {
       setSettings(null);
       setLogoSrc(null);
       setHasAdvancedReports(false);
+      setHasWhatsAppReminders(false);
       setLoading(false);
       return;
     }
@@ -127,6 +166,7 @@ export default function AppNavbar() {
 
     if (error) {
       console.error("Navbar settings error:", error.message);
+
       setSettings(null);
       setLogoSrc(null);
     } else {
@@ -139,17 +179,17 @@ export default function AppNavbar() {
       setLogoSrc(nextLogoSrc);
     }
 
+    const canManageAddons =
+      studio.role === "owner" || studio.role === "admin";
+
     const canUseAdvancedReports =
-      studio.account_type === "studio" &&
-      (studio.role === "owner" || studio.role === "admin");
+      studio.account_type === "studio" && canManageAddons;
 
     if (canUseAdvancedReports) {
-      const { data: addonData, error: addonError } = await supabase.rpc(
-        "has_my_addon",
-        {
+      const { data: addonData, error: addonError } =
+        await supabase.rpc("has_my_addon", {
           p_addon_code: "advanced_reports",
-        }
-      );
+        });
 
       if (addonError) {
         console.error(
@@ -163,6 +203,28 @@ export default function AppNavbar() {
       }
     } else {
       setHasAdvancedReports(false);
+    }
+
+    if (canManageAddons) {
+      const {
+        data: whatsappAddonData,
+        error: whatsappAddonError,
+      } = await supabase.rpc("has_my_addon", {
+        p_addon_code: "whatsapp_reminders",
+      });
+
+      if (whatsappAddonError) {
+        console.error(
+          "Navbar WhatsApp reminders addon error:",
+          whatsappAddonError.message
+        );
+
+        setHasWhatsAppReminders(false);
+      } else {
+        setHasWhatsAppReminders(Boolean(whatsappAddonData));
+      }
+    } else {
+      setHasWhatsAppReminders(false);
     }
 
     setLoading(false);
@@ -186,6 +248,9 @@ export default function AppNavbar() {
 
   const role = currentStudio.role;
 
+  const canManageExtras =
+    isIndividual || role === "owner" || role === "admin";
+
   const studioDisplayName =
     settings?.studio_name ||
     currentStudio.studio_name ||
@@ -198,6 +263,30 @@ export default function AppNavbar() {
       : role === "artist"
         ? "/dovmeci-panel"
         : "/admin-panel";
+
+  const activeExtraLinks: ExtraLink[] = [];
+
+  if (hasAdvancedReports) {
+    activeExtraLinks.push({
+      href: "/gelismis-raporlar",
+      label: "Gelişmiş Raporlar",
+      description: "Detaylı performans ve finans analizleri",
+    });
+  }
+
+  if (hasWhatsAppReminders) {
+    activeExtraLinks.push({
+      href: "/whatsapp-hatirlatma",
+      label: "WhatsApp Hatırlatma",
+      description: "Randevular için hazır WhatsApp mesajları",
+    });
+  }
+
+  const isExtrasRouteActive = activeExtraLinks.some(
+    (extra) =>
+      pathname === extra.href ||
+      pathname.startsWith(`${extra.href}/`)
+  );
 
   const linkClass = (href: string) => {
     const isActive =
@@ -252,28 +341,12 @@ export default function AppNavbar() {
 
         <nav className="flex flex-wrap items-center gap-2">
           {isIndividual ? (
-            <>
-              <Link
-                href="/solo-panel"
-                className={linkClass("/solo-panel")}
-              >
-                Solo Panel
-              </Link>
-
-              <Link
-                href="/eklentiler"
-                className={linkClass("/eklentiler")}
-              >
-                Eklentiler
-              </Link>
-
-              <Link
-                href="/ayarlar"
-                className={linkClass("/ayarlar")}
-              >
-                Ayarlar
-              </Link>
-            </>
+            <Link
+              href="/solo-panel"
+              className={linkClass("/solo-panel")}
+            >
+              Solo Panel
+            </Link>
           ) : (
             <>
               {(role === "owner" || role === "admin") && (
@@ -311,29 +384,6 @@ export default function AppNavbar() {
                     className={linkClass("/raporlar")}
                   >
                     Raporlar
-                  </Link>
-
-                  {hasAdvancedReports ? (
-                    <Link
-                      href="/gelismis-raporlar"
-                      className={linkClass("/gelismis-raporlar")}
-                    >
-                      Gelişmiş Raporlar
-                    </Link>
-                  ) : null}
-
-                  <Link
-                    href="/eklentiler"
-                    className={linkClass("/eklentiler")}
-                  >
-                    Eklentiler
-                  </Link>
-
-                  <Link
-                    href="/ayarlar"
-                    className={linkClass("/ayarlar")}
-                  >
-                    Ayarlar
                   </Link>
                 </>
               )}
@@ -380,6 +430,107 @@ export default function AppNavbar() {
               )}
             </>
           )}
+
+          {canManageExtras ? (
+            <>
+              {activeExtraLinks.length > 0 ? (
+                <div
+                  ref={extrasMenuRef}
+                  className="relative"
+                >
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExtrasOpen((current) => !current)
+                    }
+                    aria-expanded={extrasOpen}
+                    className={`flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition ${
+                      isExtrasRouteActive
+                        ? "bg-yellow-400 text-neutral-950"
+                        : "text-neutral-200 hover:bg-white/10 hover:text-white"
+                    }`}
+                  >
+                    Ekstralar
+
+                    <span
+                      className={`text-xs transition-transform ${
+                        extrasOpen ? "rotate-180" : ""
+                      }`}
+                    >
+                      ▼
+                    </span>
+                  </button>
+
+                  {extrasOpen ? (
+                    <div className="absolute right-0 top-[calc(100%+0.5rem)] z-[60] w-72 max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-white/10 bg-neutral-950 p-2 shadow-2xl shadow-black/50">
+                      <div className="border-b border-white/10 px-3 py-2">
+                        <p className="text-xs font-bold uppercase tracking-wider text-yellow-300">
+                          Aktif Ekstralar
+                        </p>
+
+                        <p className="mt-1 text-xs text-neutral-500">
+                          Hesabına tanımlanmış özellikler
+                        </p>
+                      </div>
+
+                      <div className="mt-2 space-y-1">
+                        {activeExtraLinks.map((extra) => {
+                          const isActive =
+                            pathname === extra.href ||
+                            pathname.startsWith(
+                              `${extra.href}/`
+                            );
+
+                          return (
+                            <Link
+                              key={extra.href}
+                              href={extra.href}
+                              onClick={() =>
+                                setExtrasOpen(false)
+                              }
+                              className={`block rounded-xl px-3 py-3 transition ${
+                                isActive
+                                  ? "bg-yellow-400 text-neutral-950"
+                                  : "text-white hover:bg-white/10"
+                              }`}
+                            >
+                              <p className="text-sm font-black">
+                                {extra.label}
+                              </p>
+
+                              <p
+                                className={`mt-1 text-xs ${
+                                  isActive
+                                    ? "text-neutral-800"
+                                    : "text-neutral-500"
+                                }`}
+                              >
+                                {extra.description}
+                              </p>
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              <Link
+                href="/eklentiler"
+                className={linkClass("/eklentiler")}
+              >
+                Eklentiler
+              </Link>
+
+              <Link
+                href="/ayarlar"
+                className={linkClass("/ayarlar")}
+              >
+                Ayarlar
+              </Link>
+            </>
+          ) : null}
 
           <button
             type="button"
