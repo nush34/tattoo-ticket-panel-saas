@@ -8,6 +8,95 @@ import { getCurrentStudio, getPanelPathByRole } from "../../lib/saas/studio";
 type StudioStatus = "trial" | "active" | "suspended" | "cancelled";
 type AccountType = "studio" | "individual";
 
+type AddonBillingType = "monthly" | "yearly" | "one_time";
+type AddonLicenseStatus =
+  | "inactive"
+  | "trial"
+  | "active"
+  | "expired"
+  | "cancelled";
+
+type Addon = {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  billing_type: AddonBillingType;
+  monthly_price: number | null;
+  yearly_price: number | null;
+  one_time_price: number | null;
+  is_active: boolean;
+  available_for_studio: boolean;
+  available_for_individual: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
+type StudioAddonLicense = {
+  id: string;
+  studio_id: string;
+  addon_id: string;
+  status: AddonLicenseStatus;
+  starts_at: string | null;
+  ends_at: string | null;
+  billing_type: AddonBillingType;
+  agreed_price: number | null;
+  auto_renew: boolean;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type AddonEditState = {
+  name: string;
+  description: string;
+  billing_type: AddonBillingType;
+  monthly_price: string;
+  yearly_price: string;
+  one_time_price: string;
+  is_active: boolean;
+  available_for_studio: boolean;
+  available_for_individual: boolean;
+  sort_order: string;
+};
+
+type StudioAddonEditState = {
+  status: AddonLicenseStatus;
+  starts_at: string;
+  ends_at: string;
+  billing_type: AddonBillingType;
+  agreed_price: string;
+  auto_renew: boolean;
+  notes: string;
+};
+
+type NewAddonState = {
+  code: string;
+  name: string;
+  description: string;
+  billing_type: AddonBillingType;
+  monthly_price: string;
+  yearly_price: string;
+  one_time_price: string;
+  available_for_studio: boolean;
+  available_for_individual: boolean;
+  sort_order: string;
+};
+
+type AddonApiResponse = {
+  addons: Addon[];
+  studioAddons: StudioAddonLicense[];
+  error?: string;
+};
+
+type AddonSummary = {
+  activeLicenses: number;
+  trialLicenses: number;
+  recurringMonthlyEstimate: number;
+  oneTimeSales: number;
+};
+
 type SuperAdminStudio = {
   studio_id: string;
   studio_name: string;
@@ -204,6 +293,78 @@ function getRenewalDaysLabel(value?: string | null) {
   return `${left} gün kaldı`;
 }
 
+function billingTypeLabel(type: AddonBillingType) {
+  if (type === "yearly") return "Yıllık";
+  if (type === "one_time") return "Tek Seferlik";
+  return "Aylık";
+}
+
+function addonStatusLabel(status: AddonLicenseStatus) {
+  if (status === "trial") return "Deneme";
+  if (status === "active") return "Aktif";
+  if (status === "expired") return "Süresi Doldu";
+  if (status === "cancelled") return "İptal";
+  return "Pasif";
+}
+
+function addonStatusClass(status: AddonLicenseStatus) {
+  if (status === "active") {
+    return "border-emerald-500/30 bg-emerald-500/10 text-emerald-200";
+  }
+
+  if (status === "trial") {
+    return "border-yellow-500/30 bg-yellow-500/10 text-yellow-200";
+  }
+
+  if (status === "expired") {
+    return "border-orange-500/30 bg-orange-500/10 text-orange-200";
+  }
+
+  if (status === "cancelled") {
+    return "border-red-500/30 bg-red-500/10 text-red-200";
+  }
+
+  return "border-white/10 bg-white/5 text-zinc-300";
+}
+
+function toDateInput(value?: string | null) {
+  if (!value) return "";
+  return value.slice(0, 10);
+}
+
+function getStudioAddonKey(studioId: string, addonId: string) {
+  return `${studioId}:${addonId}`;
+}
+
+function isAddonAvailableForAccount(addon: Addon, accountType: AccountType) {
+  if (accountType === "individual") {
+    return addon.available_for_individual;
+  }
+
+  return addon.available_for_studio;
+}
+
+function getCatalogPrice(addon: Addon, billingType: AddonBillingType) {
+  if (billingType === "yearly") return Number(addon.yearly_price || 0);
+  if (billingType === "one_time") return Number(addon.one_time_price || 0);
+  return Number(addon.monthly_price || 0);
+}
+
+function emptyNewAddon(): NewAddonState {
+  return {
+    code: "",
+    name: "",
+    description: "",
+    billing_type: "monthly",
+    monthly_price: "",
+    yearly_price: "",
+    one_time_price: "",
+    available_for_studio: true,
+    available_for_individual: false,
+    sort_order: "100",
+  };
+}
+
 export default function SuperAdminPage() {
   const router = useRouter();
 
@@ -222,6 +383,18 @@ export default function SuperAdminPage() {
   const [newOwnerEmail, setNewOwnerEmail] = useState("");
   const [newOwnerPassword, setNewOwnerPassword] = useState("");
   const [newUserLimit, setNewUserLimit] = useState(3);
+
+
+  const [addons, setAddons] = useState<Addon[]>([]);
+  const [studioAddons, setStudioAddons] = useState<StudioAddonLicense[]>([]);
+  const [addonEdits, setAddonEdits] = useState<Record<string, AddonEditState>>(
+    {}
+  );
+  const [studioAddonEdits, setStudioAddonEdits] = useState<
+    Record<string, StudioAddonEditState>
+  >({});
+  const [newAddon, setNewAddon] = useState<NewAddonState>(emptyNewAddon());
+  const [addonSavingKey, setAddonSavingKey] = useState<string | null>(null);
 
   useEffect(() => {
     loadData();
@@ -309,7 +482,363 @@ export default function SuperAdminPage() {
     });
 
     setEdits(editMap);
+
+    try {
+      const addonData = await fetchAddonManagementData(
+        sessionData.session.access_token
+      );
+      applyAddonManagementData(addonData, cleanStudios);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Eklenti yönetim bilgileri yüklenemedi.";
+      setErrorMessage(message);
+    }
     setLoading(false);
+  }
+
+
+  async function fetchAddonManagementData(token: string) {
+    const response = await fetch("/api/super-admin/addons", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      cache: "no-store",
+    });
+
+    const result = (await response.json()) as AddonApiResponse;
+
+    if (!response.ok || result.error) {
+      throw new Error(result.error || "Eklenti bilgileri alınamadı.");
+    }
+
+    return result;
+  }
+
+  function applyAddonManagementData(
+    result: AddonApiResponse,
+    studioList: SuperAdminStudio[]
+  ) {
+    const cleanAddons = (result.addons || []).map((addon) => ({
+      ...addon,
+      monthly_price:
+        addon.monthly_price === null ? null : Number(addon.monthly_price || 0),
+      yearly_price:
+        addon.yearly_price === null ? null : Number(addon.yearly_price || 0),
+      one_time_price:
+        addon.one_time_price === null
+          ? null
+          : Number(addon.one_time_price || 0),
+      sort_order: Number(addon.sort_order || 0),
+    }));
+
+    const cleanLicenses = (result.studioAddons || []).map((license) => ({
+      ...license,
+      agreed_price:
+        license.agreed_price === null
+          ? null
+          : Number(license.agreed_price || 0),
+    }));
+
+    setAddons(cleanAddons);
+    setStudioAddons(cleanLicenses);
+
+    const nextAddonEdits: Record<string, AddonEditState> = {};
+
+    cleanAddons.forEach((addon) => {
+      nextAddonEdits[addon.id] = {
+        name: addon.name,
+        description: addon.description || "",
+        billing_type: addon.billing_type,
+        monthly_price:
+          addon.monthly_price === null ? "" : String(addon.monthly_price),
+        yearly_price:
+          addon.yearly_price === null ? "" : String(addon.yearly_price),
+        one_time_price:
+          addon.one_time_price === null ? "" : String(addon.one_time_price),
+        is_active: addon.is_active,
+        available_for_studio: addon.available_for_studio,
+        available_for_individual: addon.available_for_individual,
+        sort_order: String(addon.sort_order || 0),
+      };
+    });
+
+    setAddonEdits(nextAddonEdits);
+
+    const licenseMap = new Map<string, StudioAddonLicense>();
+
+    cleanLicenses.forEach((license) => {
+      licenseMap.set(
+        getStudioAddonKey(license.studio_id, license.addon_id),
+        license
+      );
+    });
+
+    const nextStudioAddonEdits: Record<string, StudioAddonEditState> = {};
+
+    studioList.forEach((studio) => {
+      cleanAddons.forEach((addon) => {
+        if (!isAddonAvailableForAccount(addon, studio.account_type)) return;
+
+        const key = getStudioAddonKey(studio.studio_id, addon.id);
+        const license = licenseMap.get(key);
+        const billingType = license?.billing_type || addon.billing_type;
+
+        nextStudioAddonEdits[key] = {
+          status: license?.status || "inactive",
+          starts_at: toDateInput(license?.starts_at),
+          ends_at: toDateInput(license?.ends_at),
+          billing_type: billingType,
+          agreed_price:
+            license?.agreed_price === null ||
+            license?.agreed_price === undefined
+              ? String(getCatalogPrice(addon, billingType) || "")
+              : String(license.agreed_price),
+          auto_renew: Boolean(license?.auto_renew),
+          notes: license?.notes || "",
+        };
+      });
+    });
+
+    setStudioAddonEdits(nextStudioAddonEdits);
+  }
+
+  async function getAccessToken() {
+    const supabase = createClient();
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+
+    if (!token) {
+      throw new Error("Oturum bulunamadı.");
+    }
+
+    return token;
+  }
+
+  async function sendAddonAction(body: Record<string, unknown>) {
+    const token = await getAccessToken();
+
+    const response = await fetch("/api/super-admin/addons", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    const result = (await response.json()) as AddonApiResponse & {
+      success?: boolean;
+    };
+
+    if (!response.ok || result.error) {
+      throw new Error(result.error || "Eklenti işlemi tamamlanamadı.");
+    }
+
+    applyAddonManagementData(result, studios);
+    return result;
+  }
+
+  function updateAddonEdit<K extends keyof AddonEditState>(
+    addonId: string,
+    field: K,
+    value: AddonEditState[K]
+  ) {
+    setAddonEdits((prev) => ({
+      ...prev,
+      [addonId]: {
+        ...prev[addonId],
+        [field]: value,
+      },
+    }));
+  }
+
+  function updateStudioAddonEdit<K extends keyof StudioAddonEditState>(
+    studioId: string,
+    addonId: string,
+    field: K,
+    value: StudioAddonEditState[K]
+  ) {
+    const key = getStudioAddonKey(studioId, addonId);
+
+    setStudioAddonEdits((prev) => ({
+      ...prev,
+      [key]: {
+        ...prev[key],
+        [field]: value,
+      },
+    }));
+  }
+
+  function updateNewAddon<K extends keyof NewAddonState>(
+    field: K,
+    value: NewAddonState[K]
+  ) {
+    setNewAddon((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  }
+
+  async function handleCreateAddon(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    setAddonSavingKey("new-addon");
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      await sendAddonAction({
+        action: "create_catalog_addon",
+        code: newAddon.code,
+        name: newAddon.name,
+        description: newAddon.description,
+        billingType: newAddon.billing_type,
+        monthlyPrice: newAddon.monthly_price,
+        yearlyPrice: newAddon.yearly_price,
+        oneTimePrice: newAddon.one_time_price,
+        availableForStudio: newAddon.available_for_studio,
+        availableForIndividual: newAddon.available_for_individual,
+        sortOrder: newAddon.sort_order,
+        isActive: true,
+      });
+
+      setNewAddon(emptyNewAddon());
+      setSuccessMessage("Yeni ücretli eklenti kataloğa eklendi.");
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Eklenti oluşturulamadı."
+      );
+    } finally {
+      setAddonSavingKey(null);
+    }
+  }
+
+  async function handleSaveCatalogAddon(addon: Addon) {
+    const edit = addonEdits[addon.id];
+    if (!edit) return;
+
+    setAddonSavingKey(`catalog:${addon.id}`);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      await sendAddonAction({
+        action: "update_catalog_addon",
+        addonId: addon.id,
+        name: edit.name,
+        description: edit.description,
+        billingType: edit.billing_type,
+        monthlyPrice: edit.monthly_price,
+        yearlyPrice: edit.yearly_price,
+        oneTimePrice: edit.one_time_price,
+        isActive: edit.is_active,
+        availableForStudio: edit.available_for_studio,
+        availableForIndividual: edit.available_for_individual,
+        sortOrder: edit.sort_order,
+      });
+
+      setSuccessMessage(`${edit.name} eklentisi güncellendi.`);
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Eklenti güncellenemedi."
+      );
+    } finally {
+      setAddonSavingKey(null);
+    }
+  }
+
+  async function handleSaveStudioAddon(
+    studio: SuperAdminStudio,
+    addon: Addon
+  ) {
+    const key = getStudioAddonKey(studio.studio_id, addon.id);
+    const edit = studioAddonEdits[key];
+    if (!edit) return;
+
+    if (
+      edit.starts_at &&
+      edit.ends_at &&
+      new Date(edit.ends_at).getTime() <= new Date(edit.starts_at).getTime()
+    ) {
+      setErrorMessage("Eklenti bitiş tarihi başlangıçtan sonra olmalıdır.");
+      return;
+    }
+
+    setAddonSavingKey(`license:${key}`);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      await sendAddonAction({
+        action: "upsert_studio_addon",
+        studioId: studio.studio_id,
+        addonId: addon.id,
+        status: edit.status,
+        startsAt: edit.starts_at,
+        endsAt: edit.ends_at,
+        billingType: edit.billing_type,
+        agreedPrice: edit.agreed_price,
+        autoRenew: edit.auto_renew,
+        notes: edit.notes,
+      });
+
+      setSuccessMessage(
+        `${addon.name}, ${studio.studio_name} hesabı için güncellendi.`
+      );
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Eklenti lisansı kaydedilemedi."
+      );
+    } finally {
+      setAddonSavingKey(null);
+    }
+  }
+
+  async function handleCancelStudioAddon(
+    studio: SuperAdminStudio,
+    addon: Addon
+  ) {
+    const existingLicense = studioAddons.find(
+      (license) =>
+        license.studio_id === studio.studio_id && license.addon_id === addon.id
+    );
+
+    if (!existingLicense) {
+      setErrorMessage("Bu hesap için kaydedilmiş bir eklenti lisansı yok.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `${studio.studio_name} hesabındaki ${addon.name} eklentisini iptal etmek istediğine emin misin?`
+    );
+
+    if (!confirmed) return;
+
+    const key = getStudioAddonKey(studio.studio_id, addon.id);
+    setAddonSavingKey(`license:${key}`);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      await sendAddonAction({
+        action: "cancel_studio_addon",
+        studioId: studio.studio_id,
+        addonId: addon.id,
+      });
+
+      setSuccessMessage(
+        `${addon.name}, ${studio.studio_name} hesabında iptal edildi.`
+      );
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Eklenti iptal edilemedi."
+      );
+    } finally {
+      setAddonSavingKey(null);
+    }
   }
 
   async function handleLogout() {
@@ -518,6 +1047,39 @@ export default function SuperAdminPage() {
     }, emptySummary());
   }, [studios]);
 
+
+
+  const addonSummary = useMemo<AddonSummary>(() => {
+    return studioAddons.reduce<AddonSummary>(
+      (total, license) => {
+        if (license.status !== "active" && license.status !== "trial") {
+          return total;
+        }
+
+        if (license.status === "active") total.activeLicenses += 1;
+        if (license.status === "trial") total.trialLicenses += 1;
+
+        const price = Number(license.agreed_price || 0);
+
+        if (license.billing_type === "monthly") {
+          total.recurringMonthlyEstimate += price;
+        } else if (license.billing_type === "yearly") {
+          total.recurringMonthlyEstimate += price / 12;
+        } else if (license.billing_type === "one_time") {
+          total.oneTimeSales += price;
+        }
+
+        return total;
+      },
+      {
+        activeLicenses: 0,
+        trialLicenses: 0,
+        recurringMonthlyEstimate: 0,
+        oneTimeSales: 0,
+      }
+    );
+  }, [studioAddons]);
+
   if (loading) {
     return (
       <main className="min-h-screen elegant-page text-white flex items-center justify-center p-4 md:p-6">
@@ -591,6 +1153,19 @@ export default function SuperAdminPage() {
         </section>
 
         <ReportSection studios={studios} summary={summary} />
+
+
+        <AddonCatalogSection
+          addons={addons}
+          addonEdits={addonEdits}
+          newAddon={newAddon}
+          addonSummary={addonSummary}
+          savingKey={addonSavingKey}
+          onUpdateNewAddon={updateNewAddon}
+          onCreateAddon={handleCreateAddon}
+          onUpdateAddonEdit={updateAddonEdit}
+          onSaveAddon={handleSaveCatalogAddon}
+        />
 
         <section className="rounded-[2rem] elegant-card p-4 md:p-6 mb-8">
           <h2 className="text-xl md:text-2xl font-black mb-4">
@@ -1018,6 +1593,17 @@ export default function SuperAdminPage() {
                       </div>
                     </div>
                   )}
+
+                  <StudioAddonManager
+                    studio={studio}
+                    addons={addons}
+                    licenses={studioAddons}
+                    edits={studioAddonEdits}
+                    savingKey={addonSavingKey}
+                    onUpdateEdit={updateStudioAddonEdit}
+                    onSave={handleSaveStudioAddon}
+                    onCancel={handleCancelStudioAddon}
+                  />
                 </div>
               );
             })
@@ -1025,6 +1611,758 @@ export default function SuperAdminPage() {
         </section>
       </div>
     </main>
+  );
+}
+
+
+function AddonCatalogSection({
+  addons,
+  addonEdits,
+  newAddon,
+  addonSummary,
+  savingKey,
+  onUpdateNewAddon,
+  onCreateAddon,
+  onUpdateAddonEdit,
+  onSaveAddon,
+}: {
+  addons: Addon[];
+  addonEdits: Record<string, AddonEditState>;
+  newAddon: NewAddonState;
+  addonSummary: AddonSummary;
+  savingKey: string | null;
+  onUpdateNewAddon: <K extends keyof NewAddonState>(
+    field: K,
+    value: NewAddonState[K]
+  ) => void;
+  onCreateAddon: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onUpdateAddonEdit: <K extends keyof AddonEditState>(
+    addonId: string,
+    field: K,
+    value: AddonEditState[K]
+  ) => void;
+  onSaveAddon: (addon: Addon) => Promise<void>;
+}) {
+  return (
+    <section className="rounded-[2rem] elegant-card p-4 md:p-6 mb-8">
+      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-6">
+        <div>
+          <p className="inline-flex rounded-full elegant-badge-gold px-3 py-1 text-xs font-semibold">
+            Ücretli Modüller
+          </p>
+          <h2 className="text-xl md:text-2xl font-black mt-3">
+            Eklenti Kataloğu
+          </h2>
+          <p className="text-zinc-500 text-sm mt-2 max-w-3xl">
+            Eklenti fiyatlarını, hangi hesap türlerinde satılacağını ve katalogda
+            aktif olup olmayacağını buradan yönetebilirsin.
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <InfoCard
+          title="Aktif Lisans"
+          value={String(addonSummary.activeLicenses)}
+          subValue="Ücretli olarak açık eklentiler"
+        />
+        <InfoCard
+          title="Deneme Lisansı"
+          value={String(addonSummary.trialLicenses)}
+          subValue="Deneme süresindeki eklentiler"
+        />
+        <InfoCard
+          title="Aylık Eklenti Geliri"
+          value={formatPrice(addonSummary.recurringMonthlyEstimate)}
+          subValue="Yıllık ücretler 12 aya bölünür"
+        />
+        <InfoCard
+          title="Tek Seferlik Satış"
+          value={formatPrice(addonSummary.oneTimeSales)}
+          subValue="Aktif tek seferlik lisanslar"
+        />
+      </div>
+
+      <details className="rounded-3xl elegant-card-soft p-4 md:p-5 mb-6">
+        <summary className="cursor-pointer list-none font-black text-white">
+          + Yeni Eklenti Oluştur
+        </summary>
+
+        <form
+          onSubmit={onCreateAddon}
+          className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mt-5"
+        >
+          <div>
+            <label className="block text-sm text-zinc-400 mb-2">
+              Eklenti Kodu
+            </label>
+            <input
+              value={newAddon.code}
+              onChange={(event) =>
+                onUpdateNewAddon(
+                  "code",
+                  event.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "")
+                )
+              }
+              required
+              className="w-full rounded-2xl elegant-input px-4 py-3 text-white"
+              placeholder="ornek_eklenti"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm text-zinc-400 mb-2">
+              Eklenti Adı
+            </label>
+            <input
+              value={newAddon.name}
+              onChange={(event) => onUpdateNewAddon("name", event.target.value)}
+              required
+              className="w-full rounded-2xl elegant-input px-4 py-3 text-white"
+              placeholder="Örnek Eklenti"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm text-zinc-400 mb-2">
+              Varsayılan Faturalandırma
+            </label>
+            <select
+              value={newAddon.billing_type}
+              onChange={(event) =>
+                onUpdateNewAddon(
+                  "billing_type",
+                  event.target.value as AddonBillingType
+                )
+              }
+              className="w-full rounded-2xl elegant-input px-4 py-3 text-white"
+            >
+              <option value="monthly">Aylık</option>
+              <option value="yearly">Yıllık</option>
+              <option value="one_time">Tek Seferlik</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm text-zinc-400 mb-2">
+              Sıralama
+            </label>
+            <input
+              type="number"
+              min={0}
+              value={newAddon.sort_order}
+              onChange={(event) =>
+                onUpdateNewAddon("sort_order", event.target.value)
+              }
+              className="w-full rounded-2xl elegant-input px-4 py-3 text-white"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm text-zinc-400 mb-2">
+              Aylık Fiyat
+            </label>
+            <input
+              type="number"
+              min={0}
+              value={newAddon.monthly_price}
+              onChange={(event) =>
+                onUpdateNewAddon("monthly_price", event.target.value)
+              }
+              className="w-full rounded-2xl elegant-input px-4 py-3 text-white"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm text-zinc-400 mb-2">
+              Yıllık Fiyat
+            </label>
+            <input
+              type="number"
+              min={0}
+              value={newAddon.yearly_price}
+              onChange={(event) =>
+                onUpdateNewAddon("yearly_price", event.target.value)
+              }
+              className="w-full rounded-2xl elegant-input px-4 py-3 text-white"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm text-zinc-400 mb-2">
+              Tek Seferlik Fiyat
+            </label>
+            <input
+              type="number"
+              min={0}
+              value={newAddon.one_time_price}
+              onChange={(event) =>
+                onUpdateNewAddon("one_time_price", event.target.value)
+              }
+              className="w-full rounded-2xl elegant-input px-4 py-3 text-white"
+            />
+          </div>
+
+          <div className="flex flex-col justify-end gap-3">
+            <label className="flex items-center gap-3 text-sm text-zinc-300">
+              <input
+                type="checkbox"
+                checked={newAddon.available_for_studio}
+                onChange={(event) =>
+                  onUpdateNewAddon("available_for_studio", event.target.checked)
+                }
+              />
+              Stüdyo hesabında satılabilir
+            </label>
+            <label className="flex items-center gap-3 text-sm text-zinc-300">
+              <input
+                type="checkbox"
+                checked={newAddon.available_for_individual}
+                onChange={(event) =>
+                  onUpdateNewAddon(
+                    "available_for_individual",
+                    event.target.checked
+                  )
+                }
+              />
+              Bireysel hesapta satılabilir
+            </label>
+          </div>
+
+          <div className="md:col-span-2 xl:col-span-4">
+            <label className="block text-sm text-zinc-400 mb-2">
+              Açıklama
+            </label>
+            <textarea
+              value={newAddon.description}
+              onChange={(event) =>
+                onUpdateNewAddon("description", event.target.value)
+              }
+              rows={3}
+              className="w-full rounded-2xl elegant-input px-4 py-3 text-white"
+            />
+          </div>
+
+          <div className="md:col-span-2 xl:col-span-4">
+            <button
+              type="submit"
+              disabled={savingKey === "new-addon"}
+              className="w-full rounded-2xl elegant-button-gold px-4 py-4 font-black disabled:opacity-50"
+            >
+              {savingKey === "new-addon"
+                ? "Eklenti Oluşturuluyor..."
+                : "Eklentiyi Kataloğa Ekle"}
+            </button>
+          </div>
+        </form>
+      </details>
+
+      <div className="space-y-4">
+        {addons.length === 0 ? (
+          <div className="rounded-2xl elegant-card-soft p-4 text-zinc-400">
+            Katalogda henüz eklenti yok.
+          </div>
+        ) : (
+          addons.map((addon) => {
+            const edit = addonEdits[addon.id];
+            if (!edit) return null;
+
+            const isSaving = savingKey === `catalog:${addon.id}`;
+
+            return (
+              <details
+                key={addon.id}
+                className="rounded-3xl elegant-card-soft p-4 md:p-5"
+              >
+                <summary className="cursor-pointer list-none">
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-black text-white">{addon.name}</p>
+                        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-zinc-300">
+                          {addon.code}
+                        </span>
+                        <span
+                          className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+                            edit.is_active
+                              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                              : "border-red-500/30 bg-red-500/10 text-red-200"
+                          }`}
+                        >
+                          {edit.is_active ? "Katalogda Aktif" : "Katalogda Pasif"}
+                        </span>
+                      </div>
+                      <p className="text-xs text-zinc-500 mt-2">
+                        Varsayılan: {billingTypeLabel(edit.billing_type)}
+                      </p>
+                    </div>
+                    <span className="text-xs text-zinc-500">
+                      Düzenlemek için aç
+                    </span>
+                  </div>
+                </summary>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mt-5">
+                  <div>
+                    <label className="block text-sm text-zinc-400 mb-2">Ad</label>
+                    <input
+                      value={edit.name}
+                      onChange={(event) =>
+                        onUpdateAddonEdit(addon.id, "name", event.target.value)
+                      }
+                      className="w-full rounded-2xl elegant-input px-4 py-3 text-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm text-zinc-400 mb-2">
+                      Varsayılan Tür
+                    </label>
+                    <select
+                      value={edit.billing_type}
+                      onChange={(event) =>
+                        onUpdateAddonEdit(
+                          addon.id,
+                          "billing_type",
+                          event.target.value as AddonBillingType
+                        )
+                      }
+                      className="w-full rounded-2xl elegant-input px-4 py-3 text-white"
+                    >
+                      <option value="monthly">Aylık</option>
+                      <option value="yearly">Yıllık</option>
+                      <option value="one_time">Tek Seferlik</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm text-zinc-400 mb-2">
+                      Aylık Fiyat
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={edit.monthly_price}
+                      onChange={(event) =>
+                        onUpdateAddonEdit(
+                          addon.id,
+                          "monthly_price",
+                          event.target.value
+                        )
+                      }
+                      className="w-full rounded-2xl elegant-input px-4 py-3 text-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm text-zinc-400 mb-2">
+                      Yıllık Fiyat
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={edit.yearly_price}
+                      onChange={(event) =>
+                        onUpdateAddonEdit(
+                          addon.id,
+                          "yearly_price",
+                          event.target.value
+                        )
+                      }
+                      className="w-full rounded-2xl elegant-input px-4 py-3 text-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm text-zinc-400 mb-2">
+                      Tek Seferlik Fiyat
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={edit.one_time_price}
+                      onChange={(event) =>
+                        onUpdateAddonEdit(
+                          addon.id,
+                          "one_time_price",
+                          event.target.value
+                        )
+                      }
+                      className="w-full rounded-2xl elegant-input px-4 py-3 text-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm text-zinc-400 mb-2">
+                      Sıralama
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={edit.sort_order}
+                      onChange={(event) =>
+                        onUpdateAddonEdit(
+                          addon.id,
+                          "sort_order",
+                          event.target.value
+                        )
+                      }
+                      className="w-full rounded-2xl elegant-input px-4 py-3 text-white"
+                    />
+                  </div>
+
+                  <div className="flex flex-col justify-end gap-3">
+                    <label className="flex items-center gap-3 text-sm text-zinc-300">
+                      <input
+                        type="checkbox"
+                        checked={edit.is_active}
+                        onChange={(event) =>
+                          onUpdateAddonEdit(
+                            addon.id,
+                            "is_active",
+                            event.target.checked
+                          )
+                        }
+                      />
+                      Katalogda aktif
+                    </label>
+                    <label className="flex items-center gap-3 text-sm text-zinc-300">
+                      <input
+                        type="checkbox"
+                        checked={edit.available_for_studio}
+                        onChange={(event) =>
+                          onUpdateAddonEdit(
+                            addon.id,
+                            "available_for_studio",
+                            event.target.checked
+                          )
+                        }
+                      />
+                      Stüdyo hesabına açık
+                    </label>
+                  </div>
+
+                  <div className="flex flex-col justify-end gap-3">
+                    <label className="flex items-center gap-3 text-sm text-zinc-300">
+                      <input
+                        type="checkbox"
+                        checked={edit.available_for_individual}
+                        onChange={(event) =>
+                          onUpdateAddonEdit(
+                            addon.id,
+                            "available_for_individual",
+                            event.target.checked
+                          )
+                        }
+                      />
+                      Bireysel hesaba açık
+                    </label>
+                  </div>
+
+                  <div className="md:col-span-2 xl:col-span-4">
+                    <label className="block text-sm text-zinc-400 mb-2">
+                      Açıklama
+                    </label>
+                    <textarea
+                      value={edit.description}
+                      onChange={(event) =>
+                        onUpdateAddonEdit(
+                          addon.id,
+                          "description",
+                          event.target.value
+                        )
+                      }
+                      rows={3}
+                      className="w-full rounded-2xl elegant-input px-4 py-3 text-white"
+                    />
+                  </div>
+
+                  <div className="md:col-span-2 xl:col-span-4">
+                    <button
+                      type="button"
+                      onClick={() => onSaveAddon(addon)}
+                      disabled={isSaving}
+                      className="w-full rounded-2xl elegant-button-gold px-4 py-4 font-black disabled:opacity-50"
+                    >
+                      {isSaving ? "Kaydediliyor..." : "Eklentiyi Güncelle"}
+                    </button>
+                  </div>
+                </div>
+              </details>
+            );
+          })
+        )}
+      </div>
+    </section>
+  );
+}
+
+function StudioAddonManager({
+  studio,
+  addons,
+  licenses,
+  edits,
+  savingKey,
+  onUpdateEdit,
+  onSave,
+  onCancel,
+}: {
+  studio: SuperAdminStudio;
+  addons: Addon[];
+  licenses: StudioAddonLicense[];
+  edits: Record<string, StudioAddonEditState>;
+  savingKey: string | null;
+  onUpdateEdit: <K extends keyof StudioAddonEditState>(
+    studioId: string,
+    addonId: string,
+    field: K,
+    value: StudioAddonEditState[K]
+  ) => void;
+  onSave: (studio: SuperAdminStudio, addon: Addon) => Promise<void>;
+  onCancel: (studio: SuperAdminStudio, addon: Addon) => Promise<void>;
+}) {
+  const availableAddons = addons.filter((addon) =>
+    isAddonAvailableForAccount(addon, studio.account_type)
+  );
+
+  const activeCount = licenses.filter(
+    (license) =>
+      license.studio_id === studio.studio_id &&
+      (license.status === "active" || license.status === "trial")
+  ).length;
+
+  return (
+    <details className="rounded-3xl border border-yellow-400/20 bg-yellow-400/[0.04] p-4 md:p-5 mt-5">
+      <summary className="cursor-pointer list-none">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+          <div>
+            <p className="font-black text-white">Ücretli Eklentiler</p>
+            <p className="text-xs text-zinc-500 mt-1">
+              Bu hesaba özel lisans, süre ve fiyat yönetimi.
+            </p>
+          </div>
+          <span className="rounded-full border border-yellow-400/30 bg-yellow-400/10 px-3 py-1 text-xs font-semibold text-yellow-200">
+            {activeCount} aktif / deneme
+          </span>
+        </div>
+      </summary>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mt-5">
+        {availableAddons.length === 0 ? (
+          <div className="rounded-2xl elegant-card p-4 text-zinc-400 xl:col-span-2">
+            Bu hesap türü için kullanılabilir eklenti yok.
+          </div>
+        ) : (
+          availableAddons.map((addon) => {
+            const key = getStudioAddonKey(studio.studio_id, addon.id);
+            const edit = edits[key];
+            if (!edit) return null;
+
+            const license = licenses.find(
+              (item) =>
+                item.studio_id === studio.studio_id &&
+                item.addon_id === addon.id
+            );
+            const isSaving = savingKey === `license:${key}`;
+
+            return (
+              <div key={addon.id} className="rounded-3xl elegant-card p-4 md:p-5">
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-black text-white">{addon.name}</p>
+                      <span
+                        className={`rounded-full border px-3 py-1 text-xs font-semibold ${addonStatusClass(
+                          edit.status
+                        )}`}
+                      >
+                        {addonStatusLabel(edit.status)}
+                      </span>
+                    </div>
+                    <p className="text-xs text-zinc-500 mt-2">
+                      {addon.code} · Katalog fiyatı: {formatPrice(
+                        getCatalogPrice(addon, edit.billing_type)
+                      )}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-zinc-400 mb-2">
+                      Lisans Durumu
+                    </label>
+                    <select
+                      value={edit.status}
+                      onChange={(event) =>
+                        onUpdateEdit(
+                          studio.studio_id,
+                          addon.id,
+                          "status",
+                          event.target.value as AddonLicenseStatus
+                        )
+                      }
+                      className="w-full rounded-2xl elegant-input px-3 py-3 text-white"
+                    >
+                      <option value="inactive">Pasif</option>
+                      <option value="trial">Deneme</option>
+                      <option value="active">Aktif</option>
+                      <option value="expired">Süresi Doldu</option>
+                      <option value="cancelled">İptal</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-zinc-400 mb-2">
+                      Faturalandırma
+                    </label>
+                    <select
+                      value={edit.billing_type}
+                      onChange={(event) => {
+                        const nextType = event.target.value as AddonBillingType;
+                        onUpdateEdit(
+                          studio.studio_id,
+                          addon.id,
+                          "billing_type",
+                          nextType
+                        );
+                        onUpdateEdit(
+                          studio.studio_id,
+                          addon.id,
+                          "agreed_price",
+                          String(getCatalogPrice(addon, nextType) || "")
+                        );
+                      }}
+                      className="w-full rounded-2xl elegant-input px-3 py-3 text-white"
+                    >
+                      <option value="monthly">Aylık</option>
+                      <option value="yearly">Yıllık</option>
+                      <option value="one_time">Tek Seferlik</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-zinc-400 mb-2">
+                      Anlaşılan Fiyat
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={edit.agreed_price}
+                      onChange={(event) =>
+                        onUpdateEdit(
+                          studio.studio_id,
+                          addon.id,
+                          "agreed_price",
+                          event.target.value
+                        )
+                      }
+                      className="w-full rounded-2xl elegant-input px-3 py-3 text-white"
+                    />
+                  </div>
+
+                  <div className="flex items-end">
+                    <label className="flex items-center gap-3 rounded-2xl elegant-input px-3 py-3 w-full text-sm text-zinc-300">
+                      <input
+                        type="checkbox"
+                        checked={edit.auto_renew}
+                        onChange={(event) =>
+                          onUpdateEdit(
+                            studio.studio_id,
+                            addon.id,
+                            "auto_renew",
+                            event.target.checked
+                          )
+                        }
+                      />
+                      Otomatik yenileme
+                    </label>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-zinc-400 mb-2">
+                      Başlangıç
+                    </label>
+                    <input
+                      type="date"
+                      value={edit.starts_at}
+                      onChange={(event) =>
+                        onUpdateEdit(
+                          studio.studio_id,
+                          addon.id,
+                          "starts_at",
+                          event.target.value
+                        )
+                      }
+                      className="w-full rounded-2xl elegant-input px-3 py-3 text-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-zinc-400 mb-2">
+                      Bitiş
+                    </label>
+                    <input
+                      type="date"
+                      value={edit.ends_at}
+                      onChange={(event) =>
+                        onUpdateEdit(
+                          studio.studio_id,
+                          addon.id,
+                          "ends_at",
+                          event.target.value
+                        )
+                      }
+                      className="w-full rounded-2xl elegant-input px-3 py-3 text-white"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs text-zinc-400 mb-2">
+                      Not
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={edit.notes}
+                      onChange={(event) =>
+                        onUpdateEdit(
+                          studio.studio_id,
+                          addon.id,
+                          "notes",
+                          event.target.value
+                        )
+                      }
+                      className="w-full rounded-2xl elegant-input px-3 py-3 text-white"
+                      placeholder="Ödeme veya lisans notu..."
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+                  <button
+                    type="button"
+                    onClick={() => onSave(studio, addon)}
+                    disabled={isSaving}
+                    className="rounded-2xl elegant-button-gold px-4 py-3 font-black disabled:opacity-50"
+                  >
+                    {isSaving ? "Kaydediliyor..." : "Lisansı Kaydet"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => onCancel(studio, addon)}
+                    disabled={isSaving || !license}
+                    className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 font-bold text-red-200 hover:bg-red-500/20 disabled:opacity-40"
+                  >
+                    Lisansı İptal Et
+                  </button>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </details>
   );
 }
 

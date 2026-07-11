@@ -13,6 +13,7 @@ type StudioSettings = {
 
 function addCacheBuster(url: string) {
   const separator = url.includes("?") ? "&" : "?";
+
   return `${url}${separator}v=${Date.now()}`;
 }
 
@@ -26,7 +27,10 @@ async function resolveNavbarLogo(
 
   if (!cleanValue) return null;
 
-  if (cleanValue.startsWith("http://") || cleanValue.startsWith("https://")) {
+  if (
+    cleanValue.startsWith("http://") ||
+    cleanValue.startsWith("https://")
+  ) {
     return addCacheBuster(cleanValue);
   }
 
@@ -43,16 +47,23 @@ async function resolveNavbarLogo(
     return null;
   }
 
-  return data?.signedUrl ? addCacheBuster(data.signedUrl) : null;
+  return data?.signedUrl
+    ? addCacheBuster(data.signedUrl)
+    : null;
 }
 
 export default function AppNavbar() {
   const pathname = usePathname();
   const router = useRouter();
 
-  const [currentStudio, setCurrentStudio] = useState<CurrentStudio | null>(null);
-  const [settings, setSettings] = useState<StudioSettings | null>(null);
+  const [currentStudio, setCurrentStudio] =
+    useState<CurrentStudio | null>(null);
+
+  const [settings, setSettings] =
+    useState<StudioSettings | null>(null);
+
   const [logoSrc, setLogoSrc] = useState<string | null>(null);
+  const [hasAdvancedReports, setHasAdvancedReports] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const hideNavbar =
@@ -75,7 +86,10 @@ export default function AppNavbar() {
       loadNavbar();
     }
 
-    window.addEventListener("studio-settings-updated", handleSettingsUpdated);
+    window.addEventListener(
+      "studio-settings-updated",
+      handleSettingsUpdated
+    );
 
     return () => {
       window.removeEventListener(
@@ -83,6 +97,7 @@ export default function AppNavbar() {
         handleSettingsUpdated
       );
     };
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname, hideNavbar]);
 
@@ -95,6 +110,7 @@ export default function AppNavbar() {
       setCurrentStudio(null);
       setSettings(null);
       setLogoSrc(null);
+      setHasAdvancedReports(false);
       setLoading(false);
       return;
     }
@@ -113,23 +129,50 @@ export default function AppNavbar() {
       console.error("Navbar settings error:", error.message);
       setSettings(null);
       setLogoSrc(null);
-      setLoading(false);
-      return;
+    } else {
+      const nextLogoSrc = await resolveNavbarLogo(
+        supabase,
+        data?.logo_url || null
+      );
+
+      setSettings(data || null);
+      setLogoSrc(nextLogoSrc);
     }
 
-    const nextLogoSrc = await resolveNavbarLogo(
-      supabase,
-      data?.logo_url || null
-    );
+    const canUseAdvancedReports =
+      studio.account_type === "studio" &&
+      (studio.role === "owner" || studio.role === "admin");
 
-    setSettings(data || null);
-    setLogoSrc(nextLogoSrc);
+    if (canUseAdvancedReports) {
+      const { data: addonData, error: addonError } = await supabase.rpc(
+        "has_my_addon",
+        {
+          p_addon_code: "advanced_reports",
+        }
+      );
+
+      if (addonError) {
+        console.error(
+          "Navbar advanced reports addon error:",
+          addonError.message
+        );
+
+        setHasAdvancedReports(false);
+      } else {
+        setHasAdvancedReports(Boolean(addonData));
+      }
+    } else {
+      setHasAdvancedReports(false);
+    }
+
     setLoading(false);
   }
 
   async function handleLogout() {
     const supabase = createClient();
+
     await supabase.auth.signOut();
+
     router.push("/login");
     router.refresh();
   }
@@ -138,25 +181,43 @@ export default function AppNavbar() {
   if (loading) return null;
   if (!currentStudio) return null;
 
-  const isIndividual = currentStudio.account_type === "individual";
+  const isIndividual =
+    currentStudio.account_type === "individual";
+
   const role = currentStudio.role;
 
   const studioDisplayName =
-    settings?.studio_name || currentStudio.studio_name || "Tattoo Panel";
+    settings?.studio_name ||
+    currentStudio.studio_name ||
+    "Tattoo Panel";
 
-  const homeHref = isIndividual ? "/solo-panel" : "/admin-panel";
+  const homeHref = isIndividual
+    ? "/solo-panel"
+    : role === "designer"
+      ? "/tasarimci-panel"
+      : role === "artist"
+        ? "/dovmeci-panel"
+        : "/admin-panel";
 
-  const linkClass = (href: string) =>
-    `rounded-xl px-3 py-2 text-sm font-semibold transition ${
-      pathname === href
+  const linkClass = (href: string) => {
+    const isActive =
+      pathname === href ||
+      (href !== "/" && pathname.startsWith(`${href}/`));
+
+    return `rounded-xl px-3 py-2 text-sm font-semibold transition ${
+      isActive
         ? "bg-yellow-400 text-neutral-950"
         : "text-neutral-200 hover:bg-white/10 hover:text-white"
     }`;
+  };
 
   return (
     <header className="sticky top-0 z-50 border-b border-white/10 bg-neutral-950/90 backdrop-blur">
       <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 md:flex-row md:items-center md:justify-between">
-        <Link href={homeHref} className="flex items-center gap-3">
+        <Link
+          href={homeHref}
+          className="flex items-center gap-3"
+        >
           <div className="flex h-12 w-12 items-center justify-center overflow-visible rounded-2xl">
             {logoSrc ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -165,9 +226,9 @@ export default function AppNavbar() {
                 alt={studioDisplayName}
                 className="h-full w-full object-contain"
                 style={{
-  filter:
-    "drop-shadow(00.5px 0 0 white) drop-shadow(-00.5px 0 0 white) drop-shadow(0 00.5px 0 white) drop-shadow(0 -00.5px 0 white)",
-}}
+                  filter:
+                    "drop-shadow(0.45px 0 0 white) drop-shadow(-0.45px 0 0 white) drop-shadow(0 0.45px 0 white) drop-shadow(0 -0.45px 0 white)",
+                }}
               />
             ) : (
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-yellow-400 text-sm font-black text-neutral-950">
@@ -180,8 +241,11 @@ export default function AppNavbar() {
             <div className="text-sm font-black text-white">
               {studioDisplayName}
             </div>
+
             <div className="text-xs text-neutral-400">
-              {isIndividual ? "Bireysel Solo Panel" : "Stüdyo Paneli"}
+              {isIndividual
+                ? "Bireysel Solo Panel"
+                : "Stüdyo Paneli"}
             </div>
           </div>
         </Link>
@@ -189,11 +253,24 @@ export default function AppNavbar() {
         <nav className="flex flex-wrap items-center gap-2">
           {isIndividual ? (
             <>
-              <Link href="/solo-panel" className={linkClass("/solo-panel")}>
+              <Link
+                href="/solo-panel"
+                className={linkClass("/solo-panel")}
+              >
                 Solo Panel
               </Link>
 
-              <Link href="/ayarlar" className={linkClass("/ayarlar")}>
+              <Link
+                href="/eklentiler"
+                className={linkClass("/eklentiler")}
+              >
+                Eklentiler
+              </Link>
+
+              <Link
+                href="/ayarlar"
+                className={linkClass("/ayarlar")}
+              >
                 Ayarlar
               </Link>
             </>
@@ -201,27 +278,61 @@ export default function AppNavbar() {
             <>
               {(role === "owner" || role === "admin") && (
                 <>
-                  <Link href="/admin-panel" className={linkClass("/admin-panel")}>
+                  <Link
+                    href="/admin-panel"
+                    className={linkClass("/admin-panel")}
+                  >
                     Admin Panel
                   </Link>
 
-                  <Link href="/yeni-bilet" className={linkClass("/yeni-bilet")}>
+                  <Link
+                    href="/yeni-bilet"
+                    className={linkClass("/yeni-bilet")}
+                  >
                     Yeni Bilet
                   </Link>
 
-                  <Link href="/biletler" className={linkClass("/biletler")}>
+                  <Link
+                    href="/biletler"
+                    className={linkClass("/biletler")}
+                  >
                     Biletler
                   </Link>
 
-                  <Link href="/takvim" className={linkClass("/takvim")}>
+                  <Link
+                    href="/takvim"
+                    className={linkClass("/takvim")}
+                  >
                     Takvim
                   </Link>
 
-                  <Link href="/raporlar" className={linkClass("/raporlar")}>
+                  <Link
+                    href="/raporlar"
+                    className={linkClass("/raporlar")}
+                  >
                     Raporlar
                   </Link>
 
-                  <Link href="/ayarlar" className={linkClass("/ayarlar")}>
+                  {hasAdvancedReports ? (
+                    <Link
+                      href="/gelismis-raporlar"
+                      className={linkClass("/gelismis-raporlar")}
+                    >
+                      Gelişmiş Raporlar
+                    </Link>
+                  ) : null}
+
+                  <Link
+                    href="/eklentiler"
+                    className={linkClass("/eklentiler")}
+                  >
+                    Eklentiler
+                  </Link>
+
+                  <Link
+                    href="/ayarlar"
+                    className={linkClass("/ayarlar")}
+                  >
                     Ayarlar
                   </Link>
                 </>
@@ -236,15 +347,24 @@ export default function AppNavbar() {
                     Tasarımcı Paneli
                   </Link>
 
-                  <Link href="/yeni-bilet" className={linkClass("/yeni-bilet")}>
+                  <Link
+                    href="/yeni-bilet"
+                    className={linkClass("/yeni-bilet")}
+                  >
                     Yeni Bilet
                   </Link>
 
-                  <Link href="/biletler" className={linkClass("/biletler")}>
+                  <Link
+                    href="/biletler"
+                    className={linkClass("/biletler")}
+                  >
                     Biletler
                   </Link>
 
-                  <Link href="/takvim" className={linkClass("/takvim")}>
+                  <Link
+                    href="/takvim"
+                    className={linkClass("/takvim")}
+                  >
                     Takvim
                   </Link>
                 </>
